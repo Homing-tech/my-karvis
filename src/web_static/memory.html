@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karvis · 记忆</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  warm: { 50:'#fdf8f6',100:'#f2e8e5',200:'#eaddd7',300:'#e0cfc7',400:'#d2bab0',500:'#bfa094',600:'#a18072',700:'#977669',800:'#846358',900:'#43302b' }
+}}}}
+</script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fdf8f6; }
+</style>
+</head>
+<body class="pb-20" x-data="memoryApp()" x-init="load()">
+  <div class="bg-white border-b border-warm-100 px-4 py-3">
+    <h1 class="text-lg font-bold text-warm-900">🧠 记忆</h1>
+    <p class="text-xs text-warm-400" x-show="lastUpdated" x-text="'更新于 ' + lastUpdated"></p>
+  </div>
+
+  <div class="p-4 space-y-3" x-show="!loading">
+    <!-- 概要 -->
+    <div class="flex items-center gap-3 text-sm text-warm-600" x-show="sections.length">
+      <span x-text="sections.length + ' 个分类'"></span>
+      <span>·</span>
+      <span x-text="totalItems + ' 条记忆'"></span>
+    </div>
+
+    <!-- 分区卡片 -->
+    <template x-for="sec in sections" :key="sec.title">
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div @click="sec._open = !sec._open" class="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-warm-50 transition">
+          <div class="flex items-center gap-2">
+            <span x-text="sec.icon"></span>
+            <span class="text-sm font-medium text-warm-800" x-text="sec.title"></span>
+            <span class="text-xs text-warm-400" x-text="sec.items.length + '条'"></span>
+          </div>
+          <span class="text-warm-400 text-xs transition-transform" :class="sec._open ? 'rotate-90' : ''" style="display:inline-block">▶</span>
+        </div>
+        <div x-show="sec._open" x-collapse class="border-t border-warm-100 px-4 py-3">
+          <template x-for="(item, idx) in sec.items" :key="idx">
+            <p class="text-sm text-warm-700 leading-relaxed py-1 border-b border-warm-50 last:border-0" x-text="item"></p>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <!-- 空状态 -->
+    <div x-show="!sections.length" class="text-center py-12">
+      <p class="text-3xl mb-3">🫧</p>
+      <p class="text-sm text-warm-500">还没有记忆</p>
+      <p class="text-xs text-warm-400 mt-1">和 Karvis 聊天，告诉它你的偏好和重要的事</p>
+    </div>
+
+    <!-- 底部提示 -->
+    <p x-show="sections.length" class="text-center text-xs text-warm-400 pt-4">有不对的地方？在企微告诉我就好~</p>
+  </div>
+
+  <div x-show="loading" class="flex items-center justify-center h-64">
+    <p class="text-warm-400">加载中...</p>
+  </div>
+
+  <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-warm-100 flex justify-around py-2 text-xs">
+    <a href="/web/dashboard" class="flex flex-col items-center text-warm-400"><span class="text-lg">📊</span>概览</a>
+    <a href="/web/notes" class="flex flex-col items-center text-warm-400"><span class="text-lg">📝</span>速记</a>
+    <a href="/web/todos" class="flex flex-col items-center text-warm-400"><span class="text-lg">✅</span>待办</a>
+    <a href="/web/daily" class="flex flex-col items-center text-warm-400"><span class="text-lg">📖</span>日记</a>
+    <a href="/web/archive" class="flex flex-col items-center text-warm-400"><span class="text-lg">📁</span>笔记</a>
+  </nav>
+
+<script>
+const API_HEADERS = () => ({'X-Token': localStorage.getItem('karvis_token')||''});
+function checkAuth() { if(!localStorage.getItem('karvis_token')) location.href='/web/login'; }
+
+function memoryApp() {
+  return {
+    sections: [], totalItems: 0, lastUpdated: '', loading: true,
+    async load() {
+      checkAuth();
+      try {
+        const r = await fetch('/api/memory', {headers: API_HEADERS()});
+        if (r.status === 401) { localStorage.removeItem('karvis_token'); location.href='/web/login'; return; }
+        const d = await r.json();
+        // 给每个 section 加 _open 状态，默认展开前 3 个
+        this.sections = (d.sections || []).map((s, i) => ({...s, _open: i < 3}));
+        this.totalItems = d.total_items || 0;
+        this.lastUpdated = d.last_updated || '';
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    }
+  }
+}
+</script>
+</body>
+</html>

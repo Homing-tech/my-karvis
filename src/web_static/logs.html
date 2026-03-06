@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karvis · 日志 & 监控</title>
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+<script src="/web/static/chart.umd.min.js"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  warm: { 50:'#fdf8f6',100:'#f2e8e5',200:'#eaddd7',300:'#e0cfc7',400:'#d2bab0',500:'#bfa094',600:'#a18072',700:'#977669',800:'#846358',900:'#43302b' }
+}}}}
+</script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fdf8f6; }
+[x-cloak] { display: none !important; }
+.log-line { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 12px; line-height: 1.6; }
+.log-error { color: #f87171; background: rgba(248,113,113,0.08); }
+.log-warning { color: #fbbf24; background: rgba(251,191,36,0.06); }
+.log-info { color: #a5b4fc; }
+.log-area::-webkit-scrollbar { width: 8px; }
+.log-area::-webkit-scrollbar-track { background: #1e293b; }
+.log-area::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+.latency-bar { height: 22px; border-radius: 4px; min-width: 2px; transition: width 0.3s; }
+.detail-panel { animation: slideDown 0.15s ease-out; }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.group-card { border-left: 3px solid transparent; transition: all 0.15s; }
+.group-card:hover { border-left-color: #977669; }
+.group-card.is-error { border-left-color: #f87171; }
+.copy-btn { opacity: 0; transition: opacity 0.15s; }
+.group-card:hover .copy-btn, .log-row:hover .copy-btn { opacity: 1; }
+.log-row { position: relative; }
+.toast { animation: toastIn 0.2s ease-out, toastOut 0.3s ease-in 1.2s forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(-10px); } }
+</style>
+</head>
+<body class="p-4" x-data="logsApp()" x-init="init()">
+  <!-- Toast -->
+  <div x-show="toast" x-cloak class="fixed bottom-6 right-6 z-50">
+    <div class="toast bg-gray-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg" x-text="toast"></div>
+  </div>
+
+  <!-- 登录 -->
+  <div x-show="!authed" class="max-w-sm mx-auto mt-20 bg-white rounded-2xl shadow-lg p-8">
+    <h1 class="text-xl font-bold text-center mb-6" style="color:#43302b">📋 日志 & 监控</h1>
+    <input type="password" x-model="adminToken" @keydown.enter="login()" placeholder="输入管理员密钥"
+      class="w-full px-4 py-3 border rounded-xl mb-3 outline-none" style="border-color:#eaddd7">
+    <button @click="login()" class="w-full py-3 text-white rounded-xl font-medium transition" style="background:#977669">
+      进入
+    </button>
+    <p x-show="authError" class="text-red-500 text-sm text-center mt-2" x-text="authError"></p>
+  </div>
+
+  <!-- 主内容 -->
+  <div x-show="authed" x-cloak class="max-w-6xl mx-auto space-y-4">
+    <!-- 顶部标题栏 -->
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold text-warm-900">📋 日志 & 监控</h1>
+      <div class="flex items-center gap-3">
+        <a href="/web/admin" class="text-sm text-warm-500 hover:text-warm-700">← 管理面板</a>
+        <button @click="authed=false;adminToken='';localStorage.removeItem('karvis_admin_token')" class="text-sm text-warm-500">退出</button>
+      </div>
+    </div>
+
+    <!-- 主 Tab 切换 -->
+    <div class="flex rounded-lg overflow-hidden border border-warm-200 w-fit">
+      <button @click="mainTab='logs'"
+        :class="mainTab==='logs' ? 'bg-warm-700 text-white' : 'bg-white text-warm-600 hover:bg-warm-50'"
+        class="px-4 py-2 text-sm font-medium transition">日志</button>
+      <button @click="mainTab='stats'; loadStats()"
+        :class="mainTab==='stats' ? 'bg-warm-700 text-white' : 'bg-white text-warm-600 hover:bg-warm-50'"
+        class="px-4 py-2 text-sm font-medium transition">统计监控</button>
+      <button @click="mainTab='errors'; loadStats()"
+        :class="mainTab==='errors' ? 'bg-warm-700 text-white' : 'bg-white text-warm-600 hover:bg-warm-50'"
+        class="px-4 py-2 text-sm font-medium transition">错误聚合</button>
+    </div>
+
+    <!-- ==================== 日志面板 ==================== -->
+    <div x-show="mainTab==='logs'" class="space-y-4">
+      <!-- 控制栏 -->
+      <div class="bg-white rounded-xl p-4 shadow-sm">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="relative flex-1 min-w-[180px]">
+            <input type="text" x-model="keyword" @keydown.enter="fetchLogs()" placeholder="关键词搜索..."
+              class="w-full pl-8 pr-3 py-1.5 text-sm border border-warm-200 rounded-lg outline-none focus:border-warm-400">
+            <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-warm-400 text-xs">🔍</span>
+          </div>
+          <input type="text" x-model="userFilter" @keydown.enter="fetchLogs()" placeholder="用户ID..."
+            class="w-[120px] px-3 py-1.5 text-sm border border-warm-200 rounded-lg outline-none focus:border-warm-400">
+          <select x-model="level" @change="fetchLogs()"
+            class="px-3 py-1.5 text-sm border border-warm-200 rounded-lg outline-none bg-white text-warm-700">
+            <option value="">全部级别</option>
+            <option value="ERROR">ERROR</option>
+            <option value="WARNING">WARNING</option>
+          </select>
+          <select x-model="lines" @change="fetchLogs()"
+            class="px-3 py-1.5 text-sm border border-warm-200 rounded-lg outline-none bg-white text-warm-700">
+            <option value="200">200 行</option>
+            <option value="500">500 行</option>
+            <option value="1000">1000 行</option>
+          </select>
+          <!-- 视图切换 -->
+          <div class="flex rounded-md overflow-hidden border border-warm-200">
+            <button @click="viewMode='grouped'" :class="viewMode==='grouped' ? 'bg-warm-700 text-white' : 'bg-white text-warm-500'"
+              class="px-2.5 py-1.5 text-xs transition" title="按请求分组">📦</button>
+            <button @click="viewMode='raw'" :class="viewMode==='raw' ? 'bg-warm-700 text-white' : 'bg-white text-warm-500'"
+              class="px-2.5 py-1.5 text-xs transition" title="原始视图">📄</button>
+          </div>
+          <button @click="fetchLogs()" class="px-3 py-1.5 text-sm bg-warm-700 text-white rounded-lg hover:bg-warm-800 transition">刷新</button>
+          <button @click="autoRefresh=!autoRefresh" :class="autoRefresh ? 'bg-green-600' : 'bg-warm-400'"
+            class="px-3 py-1.5 text-sm text-white rounded-lg transition">
+            <span x-text="autoRefresh ? '⟳ 自动' : '⟳ 自动'"></span>
+          </button>
+          <button @click="copyAll()" class="px-3 py-1.5 text-sm bg-warm-200 text-warm-700 rounded-lg hover:bg-warm-300 transition" title="复制全部">📋</button>
+          <button @click="scrollToBottom()" class="px-3 py-1.5 text-sm bg-warm-200 text-warm-700 rounded-lg hover:bg-warm-300 transition">↓</button>
+        </div>
+        <div class="flex items-center justify-between mt-3 text-xs text-warm-500">
+          <span>共 <strong x-text="logLines.length"></strong> 行
+            <template x-if="viewMode==='grouped'">
+              <span>（<strong x-text="logGroups.length"></strong> 个请求）</span>
+            </template>
+          </span>
+          <span x-show="lastFetch" x-text="'上次刷新: ' + lastFetch"></span>
+        </div>
+      </div>
+
+      <!-- ===== 分组视图 ===== -->
+      <div x-show="viewMode==='grouped'" class="space-y-2">
+        <template x-for="(g, gi) in logGroups" :key="gi">
+          <div class="group-card rounded-xl shadow-sm overflow-hidden"
+               :class="g.hasError ? 'is-error bg-red-50/50' : 'bg-white'">
+            <!-- 分组标题栏 -->
+            <div @click="g.expanded = !g.expanded"
+                 class="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-warm-50/50 transition select-none">
+              <!-- 时间 -->
+              <span class="text-xs font-mono text-warm-400 w-[60px] shrink-0" x-text="g.time || '--:--'"></span>
+              <!-- Request ID -->
+              <span x-show="g.rid" class="text-xs font-mono px-1.5 py-0.5 rounded shrink-0"
+                    :class="g.hasError ? 'bg-red-100 text-red-700' : 'bg-warm-100 text-warm-600'"
+                    x-text="g.rid"></span>
+              <!-- 摘要 -->
+              <span class="text-sm flex-1 truncate" :class="g.hasError ? 'text-red-800' : 'text-warm-700'" x-text="g.summary"></span>
+              <!-- 行数 -->
+              <span class="text-xs text-warm-400 shrink-0" x-text="g.lines.length + ' 行'"></span>
+              <!-- 耗时 -->
+              <span x-show="g.elapsed" class="text-xs font-mono shrink-0"
+                    :class="parseFloat(g.elapsed)>15 ? 'text-red-500' : parseFloat(g.elapsed)>8 ? 'text-yellow-600' : 'text-green-600'"
+                    x-text="g.elapsed + 's'"></span>
+              <!-- 复制 -->
+              <button @click.stop="copyGroup(g)" class="copy-btn text-xs text-warm-400 hover:text-warm-600 px-1" title="复制">📋</button>
+              <span class="text-warm-300 text-[10px]" x-text="g.expanded ? '▲' : '▼'"></span>
+            </div>
+            <!-- 展开内容 -->
+            <div x-show="g.expanded" x-cloak class="detail-panel bg-gray-900 px-4 py-3 overflow-x-auto">
+              <template x-for="(line, li) in g.lines" :key="li">
+                <div class="log-row log-line py-0.5 flex group" :class="getLineClass(line)">
+                  <span class="text-gray-600 select-none w-[35px] shrink-0 text-right mr-2" x-text="li+1"></span>
+                  <span class="flex-1 whitespace-pre-wrap break-all" x-text="line"></span>
+                  <button @click="copyText(line)" class="copy-btn text-gray-500 hover:text-gray-300 text-[10px] ml-2 shrink-0" title="复制">📋</button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+        <div x-show="logGroups.length === 0 && !loading" class="text-warm-400 text-sm text-center py-8">暂无日志</div>
+      </div>
+
+      <!-- ===== 原始视图 ===== -->
+      <div x-show="viewMode==='raw'" class="bg-gray-900 rounded-xl shadow-sm overflow-hidden">
+        <div x-ref="logArea" class="log-area p-4 overflow-auto" style="height: calc(100vh - 320px); min-height: 400px;">
+          <div x-show="loading" class="text-gray-400 text-sm text-center py-8">加载中...</div>
+          <div x-show="error" class="text-red-400 text-sm text-center py-8" x-text="error"></div>
+          <div x-show="!loading && !error">
+            <div x-show="logLines.length === 0" class="text-gray-500 text-sm text-center py-8">暂无日志</div>
+            <template x-for="(line, i) in logLines" :key="i">
+              <div class="log-row log-line py-0.5 border-b border-gray-800/50 hover:bg-gray-800/50 flex" :class="getLineClass(line)">
+                <span class="text-gray-600 select-none w-[40px] shrink-0 text-right mr-2" x-text="String(i+1).padStart(4,' ')"></span>
+                <span class="flex-1" x-text="line"></span>
+                <button @click="copyText(line)" class="copy-btn text-gray-500 hover:text-gray-300 text-[10px] ml-2 shrink-0">📋</button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 统计面板 ==================== -->
+    <div x-show="mainTab==='stats'" class="space-y-4">
+      <div x-show="statsLoading" class="text-warm-500 text-sm text-center py-8">加载统计数据...</div>
+      <div x-show="!statsLoading && stats" class="space-y-4">
+
+        <!-- 汇总卡片 -->
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-warm-500">今日 Token</p>
+            <p class="text-xl font-bold text-warm-800" x-text="fmtNum(stats?.token?.today?.total || 0)"></p>
+            <p class="text-xs text-warm-400 mt-1" x-text="(stats?.token?.today?.calls || 0) + ' 次调用'"></p>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-warm-500">今日成本</p>
+            <p class="text-xl font-bold text-warm-800" x-text="'¥' + (stats?.token?.today_cost || 0).toFixed(4)"></p>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-warm-500">本月成本</p>
+            <p class="text-xl font-bold" :class="(stats?.token?.month_cost || 0) > budgetLimit * 0.8 ? 'text-red-600' : 'text-warm-800'"
+              x-text="'¥' + (stats?.token?.month_cost || 0).toFixed(2)"></p>
+            <div class="mt-1.5 bg-warm-100 rounded-full h-2 overflow-hidden">
+              <div class="h-full rounded-full transition-all"
+                :class="budgetPct > 80 ? 'bg-red-400' : budgetPct > 50 ? 'bg-yellow-400' : 'bg-green-400'"
+                :style="'width:' + Math.min(budgetPct, 100) + '%'"></div>
+            </div>
+            <p class="text-xs mt-1" :class="budgetPct > 80 ? 'text-red-500' : 'text-warm-400'"
+              x-text="'预算 ¥' + budgetLimit + ' · ' + budgetPct.toFixed(0) + '%'"></p>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-warm-500">周期累计成本</p>
+            <p class="text-xl font-bold text-warm-800" x-text="'¥' + (stats?.token?.total_cost || 0).toFixed(2)"></p>
+            <p class="text-xs text-warm-400 mt-1" x-text="'最近 ' + (stats?.period_days || 14) + ' 天'"></p>
+          </div>
+          <div class="bg-white rounded-xl p-4 shadow-sm">
+            <p class="text-xs text-warm-500">平均延迟</p>
+            <p class="text-xl font-bold" :class="(stats?.latency?.stats?.avg||0) > 10 ? 'text-red-600' : 'text-warm-800'"
+              x-text="(stats?.latency?.stats?.avg || '-') + 's'"></p>
+            <p class="text-xs text-warm-400 mt-1"
+              x-text="'P90=' + (stats?.latency?.stats?.p90 || '-') + 's  P99=' + (stats?.latency?.stats?.p99 || '-') + 's'"></p>
+          </div>
+        </div>
+
+        <!-- 预算告警 -->
+        <div x-show="budgetPct >= 80" class="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p class="text-sm text-red-700 font-medium">
+            💰 本月成本已达预算的 <strong x-text="budgetPct.toFixed(0) + '%'"></strong>
+            （¥<span x-text="(stats?.token?.month_cost || 0).toFixed(2)"></span> / ¥<span x-text="budgetLimit"></span>）
+          </p>
+        </div>
+
+        <!-- 异常告警 -->
+        <div x-show="(stats?.latency?.stats?.slow_15s || 0) > 0" class="bg-red-50 border border-red-200 rounded-xl p-4">
+          <p class="text-sm text-red-700 font-medium">
+            ⚠️ 有 <strong x-text="stats?.latency?.stats?.slow_15s"></strong> 次请求超过 15s，
+            <span x-text="stats?.latency?.stats?.slow_8s"></span> 次超过 8s
+            （共 <span x-text="stats?.latency?.stats?.count"></span> 次请求）
+          </p>
+        </div>
+
+        <!-- Prompt 膨胀检测 -->
+        <div x-show="(stats?.token?.prompt_dist?.gt12k || 0) > 0" class="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+          <p class="text-sm text-yellow-700 font-medium">
+            📝 有 <strong x-text="stats?.token?.prompt_dist?.gt12k"></strong> 次请求 prompt_tokens > 12K，
+            可能存在记忆膨胀，建议检查 memory.md 大小
+          </p>
+        </div>
+
+        <!-- Token 用量趋势图 -->
+        <div class="bg-white rounded-xl p-5 shadow-sm">
+          <h2 class="text-sm font-bold text-warm-800 mb-3">Token 用量趋势</h2>
+          <div style="position:relative; height:200px;"><canvas id="tokenChart"></canvas></div>
+        </div>
+
+        <!-- 模型占比 + 用户用量 + Prompt 分布 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-white rounded-xl p-5 shadow-sm">
+            <h2 class="text-sm font-bold text-warm-800 mb-3">模型 Token 分布</h2>
+            <div style="position:relative; height:200px;"><canvas id="modelChart"></canvas></div>
+          </div>
+          <div class="bg-white rounded-xl p-5 shadow-sm">
+            <h2 class="text-sm font-bold text-warm-800 mb-3">用户 Token 用量</h2>
+            <template x-for="[uid, s] in Object.entries(stats?.token?.by_user || {})" :key="uid">
+              <div class="flex items-center justify-between py-2 border-b border-warm-50 last:border-0">
+                <span class="text-sm text-warm-700" x-text="uid"></span>
+                <div class="text-right">
+                  <span class="text-sm font-medium text-warm-800" x-text="fmtNum(s.total)"></span>
+                  <span class="text-xs text-warm-400 ml-1" x-text="s.calls + '次'"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="bg-white rounded-xl p-5 shadow-sm">
+            <h2 class="text-sm font-bold text-warm-800 mb-3">Prompt Token 分布</h2>
+            <div style="position:relative; height:200px;"><canvas id="promptDistChart"></canvas></div>
+          </div>
+        </div>
+
+        <!-- 延迟瀑布图 -->
+        <div class="bg-white rounded-xl p-5 shadow-sm">
+          <h2 class="text-sm font-bold text-warm-800 mb-3">最近请求延迟（点击展开详情）</h2>
+          <div class="space-y-0.5 max-h-[600px] overflow-y-auto">
+            <template x-for="(d, i) in (stats?.latency?.recent || []).slice(0, 50)" :key="i">
+              <div>
+                <div @click="expandedRow = (expandedRow === i ? null : i)"
+                  class="flex items-center gap-2 text-xs py-1 cursor-pointer hover:bg-warm-50 rounded px-1 transition">
+                  <span class="text-warm-400 w-[110px] shrink-0 font-mono" x-text="d.ts.slice(5,16)"></span>
+                  <div class="flex-1 bg-warm-50 rounded overflow-hidden relative" style="height:22px;">
+                    <div class="latency-bar absolute left-0 top-0"
+                      :style="'width:' + Math.min(d.elapsed_s / 30 * 100, 100) + '%'"
+                      :class="d.elapsed_s > 15 ? 'bg-red-400' : d.elapsed_s > 8 ? 'bg-yellow-400' : 'bg-green-400'">
+                    </div>
+                    <span class="relative z-10 px-2 leading-[22px] font-mono"
+                      :class="d.elapsed_s > 15 ? 'text-red-800' : 'text-warm-700'"
+                      x-text="d.elapsed_s + 's'"></span>
+                  </div>
+                  <span class="w-[100px] shrink-0 text-warm-600 truncate font-mono" x-text="d.skill"></span>
+                  <span class="w-[80px] shrink-0 text-warm-400 truncate" x-text="d.user_id"></span>
+                  <span class="text-warm-300 text-[10px]" x-text="expandedRow === i ? '▲' : '▼'"></span>
+                </div>
+                <div x-show="expandedRow === i" x-cloak class="detail-panel ml-[110px] mr-2 mb-2 bg-warm-50 rounded-lg p-3 text-xs space-y-2 border border-warm-100">
+                  <div class="flex flex-wrap gap-x-4 gap-y-1">
+                    <div><span class="text-warm-500 font-medium">技能：</span><span class="text-warm-800 font-mono bg-warm-200 px-1 rounded" x-text="d.skill"></span></div>
+                    <div><span class="text-warm-500 font-medium">输入类型：</span><span class="text-warm-800" x-text="d.input_type || '-'"></span></div>
+                    <div><span class="text-warm-500 font-medium">动作：</span><span class="text-warm-800" x-text="d.action || '-'"></span></div>
+                    <div><span class="text-warm-500 font-medium">有回复：</span><span class="text-warm-800" x-text="d.has_reply ? '是' : '否'"></span></div>
+                    <div><span class="text-warm-500 font-medium">用户：</span><span class="text-warm-800" x-text="d.user_id"></span></div>
+                    <div><span class="text-warm-500 font-medium">耗时：</span><span class="text-warm-800 font-mono" x-text="d.elapsed_s + 's'"></span></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- 技能热力图 -->
+        <div class="bg-white rounded-xl p-5 shadow-sm">
+          <h2 class="text-sm font-bold text-warm-800 mb-3">技能调用 TOP15</h2>
+          <div class="space-y-2">
+            <template x-for="[skill, count] in (stats?.skills?.top || [])" :key="skill">
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-warm-600 w-[130px] shrink-0 truncate font-mono" x-text="skill"></span>
+                <div class="flex-1 bg-warm-50 rounded overflow-hidden" style="height:20px;">
+                  <div class="h-full bg-warm-400 rounded transition-all"
+                    :style="'width:' + (count / ((stats?.skills?.top || [[0,1]])[0][1] || 1) * 100) + '%'"></div>
+                </div>
+                <span class="text-xs font-bold text-warm-700 w-[40px] text-right" x-text="count"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 错误聚合面板 ==================== -->
+    <div x-show="mainTab==='errors'" class="space-y-4">
+      <div x-show="statsLoading" class="text-warm-500 text-sm text-center py-8">加载错误数据...</div>
+      <div x-show="!statsLoading && stats" class="space-y-4">
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-bold text-warm-800">错误日志聚合（最近 5000 行）</h2>
+            <span class="text-xs text-warm-500" x-text="(stats?.errors?.length || 0) + ' 种错误'"></span>
+          </div>
+          <div x-show="!stats?.errors?.length" class="text-center text-warm-400 text-sm py-6">
+            ✅ 最近无错误，运行正常
+          </div>
+          <div class="space-y-3">
+            <template x-for="(err, i) in (stats?.errors || [])" :key="i">
+              <div class="border border-red-100 rounded-lg overflow-hidden">
+                <div @click="expandedError = (expandedError === i ? null : i)"
+                  class="flex items-center justify-between p-3 bg-red-50 cursor-pointer hover:bg-red-100 transition">
+                  <div class="flex items-center gap-3 flex-1 min-w-0">
+                    <span class="bg-red-200 text-red-800 text-xs font-bold px-2 py-0.5 rounded-full shrink-0"
+                      x-text="err.count + '×'"></span>
+                    <span class="text-sm text-red-800 font-mono truncate" x-text="err.key"></span>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span class="text-xs text-red-400" x-text="err.last_ts"></span>
+                    <span class="text-red-300 text-[10px]" x-text="expandedError === i ? '▲' : '▼'"></span>
+                  </div>
+                </div>
+                <div x-show="expandedError === i" x-cloak class="detail-panel p-3 bg-gray-900 text-gray-300">
+                  <pre class="text-xs font-mono whitespace-pre-wrap leading-relaxed" x-text="err.sample"></pre>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+function logsApp() {
+  // 正则：提取时间戳和 Request ID
+  // 新格式: "08:09:02 [a1b2c3d4] [xxx] ..." 或 "08:09:02 [xxx] ..."
+  const RE_RID = /^\d{2}:\d{2}:\d{2}\s+\[([a-f0-9]{8})\]/;
+  const RE_TIME = /^(\d{2}:\d{2}:\d{2})/;
+
+  return {
+    authed: false, adminToken: '', authError: '',
+    mainTab: 'logs',
+    // 日志
+    keyword: '', level: '', lines: '200', userFilter: '',
+    logLines: [], logGroups: [], loading: false, error: '',
+    autoRefresh: false, lastFetch: '', _timer: null,
+    viewMode: 'grouped',
+    toast: '',
+    // 统计
+    stats: null, statsLoading: false, _charts: {},
+    expandedRow: null, expandedError: null,
+    budgetLimit: 50,
+
+    get budgetPct() {
+      return ((this.stats?.token?.month_cost || 0) / this.budgetLimit) * 100;
+    },
+
+    async login() {
+      this.authError = '';
+      try {
+        const r = await fetch('/api/admin/users', { headers: {'X-Admin-Token': this.adminToken} });
+        if (r.status === 403) { this.authError = '密钥错误'; return; }
+        localStorage.setItem('karvis_admin_token', this.adminToken);
+        this.authed = true;
+        this.fetchLogs();
+      } catch(e) { this.authError = '网络错误'; }
+    },
+
+    async init() {
+      const saved = localStorage.getItem('karvis_admin_token');
+      if (saved) { this.adminToken = saved; await this.login(); }
+      this.$watch('autoRefresh', (val) => {
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        if (val) { this._timer = setInterval(() => this.fetchLogs(true), 3000); }
+      });
+    },
+
+    // ---- 日志 ----
+    async fetchLogs(silent) {
+      if (!silent) { this.loading = true; }
+      this.error = '';
+      try {
+        const params = new URLSearchParams({ lines: this.lines, keyword: this.keyword, level: this.level, user: this.userFilter });
+        const r = await fetch('/api/admin/logs?' + params, { headers: { 'X-Admin-Token': this.adminToken } });
+        if (r.status === 403) { this.authed = false; this.authError = '令牌已失效'; return; }
+        const d = await r.json();
+        this.logLines = d.lines || [];
+        this.logGroups = this.buildGroups(this.logLines);
+        this.lastFetch = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        if (this.autoRefresh && this.viewMode === 'raw') {
+          this.$nextTick(() => this.scrollToBottom());
+        }
+      } catch(e) {
+        if (!silent) { this.error = '获取日志失败: ' + e.message; }
+      } finally { this.loading = false; }
+    },
+
+    buildGroups(lines) {
+      // 按 Request ID 分组，无 RID 的连续行归入 "系统" 组
+      const groups = [];
+      let cur = null;
+
+      for (const line of lines) {
+        const ridMatch = line.match(RE_RID);
+        const timeMatch = line.match(RE_TIME);
+        const rid = ridMatch ? ridMatch[1] : null;
+        const time = timeMatch ? timeMatch[1] : null;
+
+        if (rid) {
+          // 有 Request ID：找已有组或新建
+          if (cur && cur.rid === rid) {
+            cur.lines.push(line);
+          } else {
+            cur = { rid, time, lines: [line], expanded: false, hasError: false, summary: '', elapsed: '' };
+            groups.push(cur);
+          }
+        } else {
+          // 无 RID 的行：如果跟上一组 RID 一样就追加（比如 traceback），否则新建系统组
+          if (cur && !cur.rid) {
+            cur.lines.push(line);
+          } else {
+            cur = { rid: null, time, lines: [line], expanded: false, hasError: false, summary: '', elapsed: '' };
+            groups.push(cur);
+          }
+        }
+      }
+
+      // 为每个组生成摘要
+      for (const g of groups) {
+        const all = g.lines.join('\n');
+        g.hasError = /error|exception|traceback|失败/i.test(all);
+
+        // 提取摘要：找第一个有实际内容的标签行
+        for (const l of g.lines) {
+          // 尝试匹配 [企微] user=xxx, type=xxx
+          const wework = l.match(/\[企微\]\s*user=(\w+),\s*type=(\w+)/);
+          if (wework) { g.summary = `${wework[1]} · ${wework[2]}`; break; }
+          // 尝试匹配 [/process] 开始处理
+          const proc = l.match(/\[\/process\]\s*开始处理\s*type=(\w+),\s*user=(\w+)/);
+          if (proc) { g.summary = `${proc[2]} · ${proc[1]}`; break; }
+          // 尝试匹配 [/system] action=xxx
+          const sys = l.match(/\[\/system\]\s*action=(\w+)/);
+          if (sys) { g.summary = `系统 · ${sys[1]}`; break; }
+          // 尝试匹配 [Brain] 决策
+          const brain = l.match(/\[Brain\]\s*决策:\s*skill=(\S+)/);
+          if (brain) { g.summary = `决策 → ${brain[1]}`; break; }
+          // 尝试匹配 [Init] / [Scheduler]
+          const init = l.match(/\[(Init|Scheduler)[^\]]*\]\s*(.*)/);
+          if (init) { g.summary = init[2].substring(0, 60); break; }
+        }
+        if (!g.summary) {
+          // 没匹配到特征，用第一行去掉时间戳和 RID 前缀
+          const first = g.lines[0] || '';
+          g.summary = first.replace(/^\d{2}:\d{2}:\d{2}\s+(\[[a-f0-9]{8}\]\s*)?/, '').substring(0, 80);
+        }
+
+        // 提取耗时
+        const elMatch = all.match(/耗时=(\d+\.?\d*)s/);
+        if (elMatch) g.elapsed = elMatch[1];
+        const totalMatch = all.match(/总计:\s*(\d+\.?\d*)s/);
+        if (totalMatch) g.elapsed = totalMatch[1];
+      }
+
+      return groups;
+    },
+
+    getLineClass(line) {
+      if (!line) return '';
+      const u = line.toUpperCase();
+      if (u.includes('ERROR') || u.includes('TRACEBACK') || u.includes('EXCEPTION') || u.includes('失败')) return 'log-error';
+      if (u.includes('WARNING') || u.includes('WARN')) return 'log-warning';
+      return 'text-gray-300';
+    },
+
+    scrollToBottom() {
+      const area = this.$refs.logArea;
+      if (area) area.scrollTop = area.scrollHeight;
+    },
+
+    // ---- 复制 ----
+    copyText(text) {
+      navigator.clipboard.writeText(text).then(() => this.showToast('已复制'));
+    },
+    copyGroup(g) {
+      navigator.clipboard.writeText(g.lines.join('\n')).then(() => this.showToast(`已复制 ${g.lines.length} 行`));
+    },
+    copyAll() {
+      navigator.clipboard.writeText(this.logLines.join('\n')).then(() => this.showToast(`已复制全部 ${this.logLines.length} 行`));
+    },
+    showToast(msg) {
+      this.toast = msg;
+      setTimeout(() => { this.toast = ''; }, 1500);
+    },
+
+    // ---- 统计 ----
+    async loadStats() {
+      if (this.stats) { this.$nextTick(() => { requestAnimationFrame(() => this.renderCharts()); }); return; }
+      this.statsLoading = true;
+      try {
+        const r = await fetch('/api/admin/stats?days=14', { headers: { 'X-Admin-Token': this.adminToken } });
+        this.stats = await r.json();
+        this.$nextTick(() => { setTimeout(() => this.renderCharts(), 50); });
+      } catch(e) { console.error(e); }
+      finally { this.statsLoading = false; }
+    },
+
+    renderCharts() {
+      if (typeof Chart === 'undefined') return;
+      this.renderTokenChart();
+      this.renderModelChart();
+      this.renderPromptDistChart();
+    },
+
+    renderTokenChart() {
+      if (this._charts.token) { this._charts.token.destroy(); }
+      const el = document.getElementById('tokenChart');
+      if (!el) return;
+      const daily = this.stats?.token?.daily || {};
+      const dates = Object.keys(daily).sort().slice(-14);
+      if (!dates.length) return;
+      this._charts.token = new Chart(el, {
+        type: 'bar',
+        data: {
+          labels: dates.map(d => d.slice(5)),
+          datasets: [
+            { label: 'Prompt', data: dates.map(d => daily[d]?.prompt || 0), backgroundColor: 'rgba(151,118,105,0.6)', stack: 'a' },
+            { label: 'Completion', data: dates.map(d => daily[d]?.completion || 0), backgroundColor: 'rgba(191,160,148,0.6)', stack: 'a' },
+          ]
+        },
+        options: {
+          plugins: { legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+          scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+          responsive: true, maintainAspectRatio: false,
+        }
+      });
+    },
+
+    renderModelChart() {
+      if (this._charts.model) { this._charts.model.destroy(); }
+      const el = document.getElementById('modelChart');
+      if (!el) return;
+      const byModel = this.stats?.token?.by_model || {};
+      const models = Object.keys(byModel);
+      if (!models.length) return;
+      const colors = ['#977669','#bfa094','#d2bab0','#e0cfc7','#eaddd7'];
+      this._charts.model = new Chart(el, {
+        type: 'doughnut',
+        data: {
+          labels: models,
+          datasets: [{ data: models.map(m => byModel[m]?.total || 0), backgroundColor: colors.slice(0, models.length) }]
+        },
+        options: {
+          plugins: { legend: { position: 'right', labels: { font: { size: 11 } } } },
+          responsive: true, maintainAspectRatio: false,
+        }
+      });
+    },
+
+    renderPromptDistChart() {
+      if (this._charts.promptDist) { this._charts.promptDist.destroy(); }
+      const el = document.getElementById('promptDistChart');
+      if (!el) return;
+      const dist = this.stats?.token?.prompt_dist || {};
+      this._charts.promptDist = new Chart(el, {
+        type: 'bar',
+        data: {
+          labels: ['<4K', '4-8K', '8-12K', '>12K'],
+          datasets: [{
+            data: [dist.lt4k||0, dist['4k_8k']||0, dist['8k_12k']||0, dist.gt12k||0],
+            backgroundColor: ['#86efac','#fde047','#fdba74','#fca5a5'],
+          }]
+        },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true } },
+          responsive: true, maintainAspectRatio: false,
+        }
+      });
+    },
+
+    fmtNum(n) {
+      if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+      return String(n);
+    },
+  }
+}
+</script>
+</body>
+</html>

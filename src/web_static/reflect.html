@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karvis · 深度自问</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  warm: { 50:'#fdf8f6',100:'#f2e8e5',200:'#eaddd7',300:'#e0cfc7',400:'#d2bab0',500:'#bfa094',600:'#a18072',700:'#977669',800:'#846358',900:'#43302b' }
+}}}}
+</script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fdf8f6; }
+</style>
+</head>
+<body class="pb-20" x-data="reflectApp()" x-init="load()">
+
+  <!-- 顶部 -->
+  <div class="bg-white border-b border-warm-100 px-4 py-4 flex items-center gap-3">
+    <a href="/web/dashboard" class="text-warm-400 hover:text-warm-600 text-lg">←</a>
+    <h1 class="text-lg font-bold text-warm-900">🔮 深度自问</h1>
+  </div>
+
+  <div class="p-4 space-y-4" x-show="!loading">
+
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-2 gap-3" x-show="stats.total_answered > 0">
+      <div class="bg-white rounded-xl p-4 shadow-sm text-center">
+        <p class="text-xs text-warm-500">已回答</p>
+        <p class="text-2xl font-bold text-warm-800" x-text="stats.total_answered"></p>
+        <p class="text-xs text-warm-400">个问题</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm text-center">
+        <p class="text-xs text-warm-500">连续</p>
+        <p class="text-2xl font-bold text-warm-800" x-text="stats.streak"></p>
+        <p class="text-xs text-warm-400">天</p>
+      </div>
+    </div>
+
+    <!-- 分类分布 -->
+    <div class="bg-white rounded-xl p-4 shadow-sm" x-show="Object.keys(stats.category_counts || {}).length > 0">
+      <p class="text-sm font-medium text-warm-700 mb-3">分类分布</p>
+      <div class="space-y-2">
+        <template x-for="cat in sortedCategories" :key="cat.key">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-warm-600 w-16 shrink-0" x-text="categoryLabel(cat.key)"></span>
+            <div class="flex-1 bg-warm-100 rounded-full h-2.5 overflow-hidden">
+              <div class="h-full rounded-full transition-all" :style="`width: ${maxCatCount ? Math.round(cat.count / maxCatCount * 100) : 0}%; background: ${categoryColor(cat.key)}`"></div>
+            </div>
+            <span class="text-xs text-warm-400 w-6 text-right" x-text="cat.count"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- 分类筛选 -->
+    <div class="flex flex-wrap gap-2" x-show="stats.total_answered > 0">
+      <button @click="filterCat = ''; loadEntries()"
+        :class="filterCat === '' ? 'bg-warm-700 text-white' : 'bg-white text-warm-600 border border-warm-200'"
+        class="px-3 py-1 rounded-full text-xs transition">全部</button>
+      <template x-for="cat in categories" :key="cat">
+        <button @click="filterCat = cat; loadEntries()"
+          :class="filterCat === cat ? 'bg-warm-700 text-white' : 'bg-white text-warm-600 border border-warm-200'"
+          class="px-3 py-1 rounded-full text-xs transition" x-text="categoryLabel(cat)"></button>
+      </template>
+    </div>
+
+    <!-- 问答列表 -->
+    <div class="space-y-3">
+      <template x-for="(e, i) in entries" :key="e.date + '-' + i">
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-xs px-2 py-0.5 rounded-full" :style="`background: ${categoryColor(e.category)}22; color: ${categoryColor(e.category)}`" x-text="categoryLabel(e.category)"></span>
+            <span class="text-xs text-warm-400" x-text="e.date || ''"></span>
+          </div>
+          <p class="text-sm font-medium text-warm-800 mb-2" x-text="'Q: ' + (e.question || '')"></p>
+          <template x-if="e.answer">
+            <div class="bg-warm-50 rounded-lg p-3">
+              <p class="text-sm text-warm-700 leading-relaxed whitespace-pre-wrap" x-text="e.answer"></p>
+            </div>
+          </template>
+          <template x-if="e.mood_signal">
+            <p class="text-xs text-warm-400 mt-2" x-text="'情绪信号：' + e.mood_signal"></p>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <!-- 加载更多 -->
+    <button x-show="hasMore" @click="loadMore()" class="w-full bg-white rounded-xl py-3 text-sm text-warm-500 shadow-sm hover:shadow-md transition">加载更多</button>
+
+    <!-- 空状态 -->
+    <div x-show="stats.total_answered === 0" class="bg-white rounded-xl p-6 shadow-sm text-center">
+      <p class="text-3xl mb-3">🔮</p>
+      <p class="text-sm font-medium text-warm-800 mb-2">还没有自问记录</p>
+      <p class="text-xs text-warm-500 leading-relaxed">管家会定期推送自我探索问题，<br>帮助你更深入地认识自己。</p>
+      <p class="text-xs text-warm-400 mt-3">在设置中开启「深度自问」推送</p>
+    </div>
+  </div>
+
+  <div x-show="loading" class="flex items-center justify-center h-64">
+    <p class="text-warm-400">加载中...</p>
+  </div>
+
+  <!-- 底部导航 -->
+  <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-warm-100 flex justify-around py-2 text-xs">
+    <a href="/web/dashboard" class="flex flex-col items-center text-warm-400"><span class="text-lg">📊</span>概览</a>
+    <a href="/web/notes" class="flex flex-col items-center text-warm-400"><span class="text-lg">📝</span>速记</a>
+    <a href="/web/todos" class="flex flex-col items-center text-warm-400"><span class="text-lg">✅</span>待办</a>
+    <a href="/web/daily" class="flex flex-col items-center text-warm-400"><span class="text-lg">📖</span>日记</a>
+    <a href="/web/archive" class="flex flex-col items-center text-warm-400"><span class="text-lg">📁</span>笔记</a>
+  </nav>
+
+<script>
+const API_HEADERS = () => ({'X-Token': localStorage.getItem('karvis_token')||''});
+function checkAuth() { if(!localStorage.getItem('karvis_token')) location.href='/web/login'; }
+
+function reflectApp() {
+  return {
+    loading: true,
+    stats: { total_answered: 0, streak: 0, category_counts: {} },
+    entries: [], categories: [], filterCat: '',
+    total: 0, offset: 0, hasMore: false,
+
+    get sortedCategories() {
+      const cc = this.stats.category_counts || {};
+      return Object.entries(cc)
+        .map(([key, count]) => ({key, count}))
+        .sort((a, b) => b.count - a.count);
+    },
+    get maxCatCount() {
+      const cats = this.sortedCategories;
+      return cats.length ? cats[0].count : 1;
+    },
+
+    categoryLabel(cat) {
+      const map = { self: '自我认知', relationship: '人际关系', growth: '成长发展', values: '价值观', future: '未来规划', past: '过往回顾' };
+      return map[cat] || cat || '未分类';
+    },
+    categoryColor(cat) {
+      const map = { self: '#977669', relationship: '#e78f8e', growth: '#6ea87a', values: '#7c8cbf', future: '#c9943e', past: '#9a7dbf' };
+      return map[cat] || '#bfa094';
+    },
+
+    async load() {
+      checkAuth();
+      try {
+        const res = await fetch('/api/reflect', {headers: API_HEADERS()});
+        if (res.status === 401) { localStorage.removeItem('karvis_token'); location.href='/web/login'; return; }
+        const d = await res.json();
+        this.stats = d.stats || this.stats;
+        this.entries = d.entries || [];
+        this.categories = d.categories || [];
+        this.total = d.total || 0;
+        this.offset = this.entries.length;
+        this.hasMore = this.offset < this.total;
+      } catch(e) { console.error(e); }
+      this.loading = false;
+    },
+    async loadEntries() {
+      this.offset = 0; this.entries = [];
+      let url = '/api/reflect?limit=20&offset=0';
+      if (this.filterCat) url += '&category=' + this.filterCat;
+      try {
+        const res = await fetch(url, {headers: API_HEADERS()});
+        const d = await res.json();
+        this.entries = d.entries || [];
+        this.total = d.total || 0;
+        this.offset = this.entries.length;
+        this.hasMore = this.offset < this.total;
+      } catch(e) { console.error(e); }
+    },
+    async loadMore() {
+      let url = `/api/reflect?limit=20&offset=${this.offset}`;
+      if (this.filterCat) url += '&category=' + this.filterCat;
+      try {
+        const res = await fetch(url, {headers: API_HEADERS()});
+        const d = await res.json();
+        this.entries = [...this.entries, ...(d.entries || [])];
+        this.offset = this.entries.length;
+        this.hasMore = this.offset < this.total;
+      } catch(e) { console.error(e); }
+    }
+  }
+}
+</script>
+</body>
+</html>

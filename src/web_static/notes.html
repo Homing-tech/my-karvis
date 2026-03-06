@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karvis · 速记</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #fdf8f6; color: #3d3229; padding-bottom: 60px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 顶栏 */
+.topbar {
+  position: sticky; top: 0; z-index: 10;
+  background: rgba(253,248,246,.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid #e8e0d8;
+  padding: 14px 16px; text-align: center;
+}
+.topbar h1 { font-size: 17px; font-weight: 700; }
+
+/* Tab 切换 */
+.tabs {
+  display: flex; gap: 0; padding: 0 16px; margin-top: 12px;
+}
+.tabs .tab {
+  flex: 1; text-align: center; padding: 8px 0; font-size: 13px;
+  color: #bfa094; border-bottom: 2px solid transparent; cursor: pointer;
+  transition: all .2s;
+}
+.tabs .tab.active {
+  color: #846358; font-weight: 600; border-bottom-color: #846358;
+}
+
+/* 时间线 */
+.timeline { padding: 20px 16px 20px 16px; }
+
+/* 日期分隔 */
+.date-sep {
+  display: flex; align-items: center; gap: 10px;
+  margin: 20px 0 14px 0; padding: 0 4px;
+}
+.date-sep:first-child { margin-top: 4px; }
+.date-sep .line { flex: 1; height: 1px; background: #ddd5cc; }
+.date-sep .label {
+  font-size: 11px; font-weight: 600; color: #a18072;
+  letter-spacing: .5px; white-space: nowrap;
+  background: #fdf8f6; padding: 2px 10px; border-radius: 10px;
+  border: 1px solid #e8e0d8;
+}
+
+/* 卡片 */
+.note-card {
+  background: #fff; border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(67,48,43,.06);
+  position: relative;
+  animation: slideUp .35s ease both;
+}
+.note-card .time {
+  font-size: 11px; color: #bfa094; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 5px;
+}
+.note-card .time::before {
+  content: ''; display: inline-block;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #d2bab0;
+}
+.note-card.misc .time::before { background: #93c5fd; }
+.note-card .body {
+  font-size: 14px; line-height: 1.65; color: #43302b;
+  word-break: break-word;
+}
+.note-card .body a { color: #6366f1; text-decoration: underline; word-break: break-all; }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 状态 */
+.state-box {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 80px 20px; color: #bfa094;
+}
+.state-box .icon { font-size: 48px; margin-bottom: 12px; }
+.state-box .msg { font-size: 14px; }
+
+/* 加载更多 */
+.load-more {
+  display: block; width: calc(100% - 32px); margin: 6px 16px 16px;
+  padding: 10px; border: none; border-radius: 12px;
+  background: #fff; color: #a18072; font-size: 13px;
+  box-shadow: 0 1px 3px rgba(67,48,43,.06); cursor: pointer;
+}
+.load-more:active { background: #f2e8e5; }
+
+/* 底栏 */
+.bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  background: #fff; border-top: 1px solid #e8e0d8;
+  display: flex; justify-content: space-around; padding: 6px 0 8px;
+}
+.bottom-nav a {
+  display: flex; flex-direction: column; align-items: center;
+  text-decoration: none; font-size: 10px; color: #bfa094; gap: 1px;
+}
+.bottom-nav a .ico { font-size: 18px; }
+.bottom-nav a.active { color: #846358; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>📝 速记</h1>
+  <div class="tabs">
+    <div class="tab active" id="tabNotes" onclick="switchTab('notes')">速记</div>
+    <div class="tab" id="tabMisc" onclick="switchTab('misc')">碎碎念</div>
+  </div>
+</div>
+
+<div id="loading" class="state-box">
+  <div class="icon">⏳</div>
+  <div class="msg">正在加载…</div>
+</div>
+
+<div id="empty" class="state-box" style="display:none">
+  <div class="icon">📭</div>
+  <div class="msg" id="emptyMsg">还没有速记，去企微聊天记录点吧</div>
+</div>
+
+<div id="timeline" class="timeline" style="display:none"></div>
+
+<button id="moreBtn" class="load-more" style="display:none">加载更多</button>
+
+<nav class="bottom-nav">
+  <a href="/web/dashboard"><span class="ico">📊</span>概览</a>
+  <a href="/web/notes" class="active"><span class="ico">📝</span>速记</a>
+  <a href="/web/todos"><span class="ico">✅</span>待办</a>
+  <a href="/web/daily"><span class="ico">📖</span>日记</a>
+  <a href="/web/archive"><span class="ico">📁</span>笔记</a>
+</nav>
+
+<script>
+(function(){
+  var token = localStorage.getItem('karvis_token');
+  if (!token) { location.href = '/web/login'; return; }
+
+  var $loading  = document.getElementById('loading');
+  var $empty    = document.getElementById('empty');
+  var $emptyMsg = document.getElementById('emptyMsg');
+  var $timeline = document.getElementById('timeline');
+  var $moreBtn  = document.getElementById('moreBtn');
+  var $tabNotes = document.getElementById('tabNotes');
+  var $tabMisc  = document.getElementById('tabMisc');
+
+  var currentTab = 'notes'; // 'notes' or 'misc'
+  var offset = 0, LIMIT = 50, hasMore = false;
+  var lastDate = '';
+
+  function esc(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function md(text) {
+    if (!text) return '';
+    var s = esc(text);
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+    s = s.replace(/(?<!href="|href=&quot;)(https?:\/\/[^\s<"&]+)/g, '<a href="$1" target="_blank">$1</a>');
+    s = s.replace(/\n/g, '<br>');
+    return s;
+  }
+
+  function dateLabel(d) {
+    var now = new Date();
+    var today = [now.getFullYear(), String(now.getMonth()+1).padStart(2,'0'), String(now.getDate()).padStart(2,'0')].join('-');
+    var yd = new Date(now); yd.setDate(yd.getDate()-1);
+    var yesterday = [yd.getFullYear(), String(yd.getMonth()+1).padStart(2,'0'), String(yd.getDate()).padStart(2,'0')].join('-');
+    if (d === today) return '今天';
+    if (d === yesterday) return '昨天';
+    if (d.slice(0,4) === String(now.getFullYear())) return d.slice(5).replace('-', ' 月 ') + ' 日';
+    return d;
+  }
+
+  function appendNotes(notes) {
+    var cardClass = currentTab === 'misc' ? 'note-card misc' : 'note-card';
+    for (var i = 0; i < notes.length; i++) {
+      var n = notes[i];
+      var d = n.time.slice(0, 10);
+
+      if (d !== lastDate) {
+        lastDate = d;
+        var sep = document.createElement('div');
+        sep.className = 'date-sep';
+        sep.innerHTML = '<span class="line"></span><span class="label">' + dateLabel(d) + '</span><span class="line"></span>';
+        $timeline.appendChild(sep);
+      }
+
+      var card = document.createElement('div');
+      card.className = cardClass;
+      card.style.animationDelay = (i * 40) + 'ms';
+      card.innerHTML =
+        '<div class="time">' + esc(n.time.slice(11)) + '</div>' +
+        '<div class="body">' + md(n.content) + '</div>';
+      $timeline.appendChild(card);
+    }
+  }
+
+  function load(append) {
+    if (!append) { offset = 0; lastDate = ''; $timeline.innerHTML = ''; }
+
+    var endpoint = currentTab === 'misc' ? '/api/misc' : '/api/notes';
+    var url = endpoint + '?limit=' + LIMIT + '&offset=' + offset;
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.setRequestHeader('X-Token', token);
+    xhr.onload = function() {
+      $loading.style.display = 'none';
+
+      if (xhr.status === 401) {
+        localStorage.removeItem('karvis_token');
+        location.href = '/web/login';
+        return;
+      }
+
+      var d;
+      try { d = JSON.parse(xhr.responseText); } catch(e) { return; }
+
+      var notes = d.notes || [];
+      hasMore = d.has_more;
+      offset += notes.length;
+
+      if (!append && notes.length === 0) {
+        $empty.style.display = '';
+        $emptyMsg.textContent = currentTab === 'misc' ? '还没有碎碎念' : '还没有速记，去企微聊天记录点吧';
+        $timeline.style.display = 'none';
+        $moreBtn.style.display = 'none';
+        return;
+      }
+
+      $empty.style.display = 'none';
+      $timeline.style.display = '';
+      appendNotes(notes);
+      $moreBtn.style.display = hasMore ? '' : 'none';
+    };
+    xhr.onerror = function() { $loading.style.display = 'none'; };
+    xhr.send();
+  }
+
+  window.switchTab = function(tab) {
+    currentTab = tab;
+    $tabNotes.className = tab === 'notes' ? 'tab active' : 'tab';
+    $tabMisc.className = tab === 'misc' ? 'tab active' : 'tab';
+    $loading.style.display = '';
+    $empty.style.display = 'none';
+    $timeline.style.display = 'none';
+    $moreBtn.style.display = 'none';
+    load(false);
+  };
+
+  $moreBtn.onclick = function() { load(true); };
+
+  load(false);
+})();
+</script>
+</body>
+</html>

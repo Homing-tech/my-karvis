@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karvis · 管理员</title>
+<script src="https://cdn.tailwindcss.com/3.4.1"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  warm: { 50:'#fdf8f6',100:'#f2e8e5',200:'#eaddd7',300:'#e0cfc7',400:'#d2bab0',500:'#bfa094',600:'#a18072',700:'#977669',800:'#846358',900:'#43302b' }
+}}}}
+</script>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #fdf8f6; }
+[x-cloak] { display: none !important; }
+.toast { animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards; }
+@keyframes toastIn { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; } }
+</style>
+</head>
+<body class="p-4" x-data="adminApp()" x-init="init()">
+  <!-- Toast -->
+  <div x-show="toast.show" x-cloak class="fixed top-4 right-4 z-[999] px-4 py-2 rounded-lg shadow-lg text-sm text-white toast"
+       :class="toast.ok ? 'bg-green-600' : 'bg-red-500'" x-text="toast.msg"></div>
+
+  <!-- 登录 -->
+  <div x-show="!authed" class="max-w-sm mx-auto mt-20 bg-white rounded-2xl shadow-lg p-8">
+    <h1 class="text-xl font-bold text-center mb-6" style="color:#43302b">🔐 管理员面板</h1>
+    <input type="password" x-model="adminToken" @keydown.enter="login()" placeholder="输入管理员密钥"
+      class="w-full px-4 py-3 border rounded-xl mb-3 outline-none" style="border-color:#eaddd7">
+    <button @click="login()" class="w-full py-3 text-white rounded-xl font-medium transition" style="background:#977669">
+      进入
+    </button>
+    <p x-show="authError" class="text-red-500 text-sm text-center mt-2" x-text="authError"></p>
+  </div>
+
+  <!-- 主内容 -->
+  <div x-show="authed" x-cloak class="max-w-5xl mx-auto space-y-6">
+    <div class="flex items-center justify-between">
+      <h1 class="text-xl font-bold text-warm-900">🔐 Karvis 用户运营中心</h1>
+      <div class="flex items-center gap-3">
+        <a href="/web/logs" class="text-sm text-warm-600 hover:text-warm-800 bg-warm-100 px-3 py-1 rounded-lg transition">📋 日志 & 监控 →</a>
+        <button @click="authed=false;adminToken='';localStorage.removeItem('karvis_admin_token')" class="text-sm text-warm-500">退出</button>
+      </div>
+    </div>
+
+    <!-- Tab 导航 -->
+    <div class="flex gap-1 bg-warm-100 rounded-xl p-1">
+      <template x-for="t in tabs" :key="t.key">
+        <button @click="activeTab=t.key" class="flex-1 py-2 text-sm font-medium rounded-lg transition"
+          :class="activeTab===t.key ? 'bg-white text-warm-900 shadow-sm' : 'text-warm-500 hover:text-warm-700'"
+          x-text="t.label"></button>
+      </template>
+    </div>
+
+    <!-- ============ Tab: 用户管理 ============ -->
+    <div x-show="activeTab==='users'" class="space-y-4">
+      <!-- 用户概览卡片 -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-warm-500">总用户</p>
+          <p class="text-xl font-bold text-warm-800" x-text="Object.keys(users).length"></p>
+        </div>
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-warm-500">活跃用户</p>
+          <p class="text-xl font-bold text-green-600" x-text="Object.values(users).filter(u=>u.status==='active').length"></p>
+        </div>
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-warm-500">今日总消息</p>
+          <p class="text-xl font-bold text-warm-800" x-text="Object.values(users).reduce((s,u)=>s+(u.message_count_today||0),0)"></p>
+        </div>
+        <div class="bg-white rounded-xl p-4 shadow-sm">
+          <p class="text-xs text-warm-500">累计消息</p>
+          <p class="text-xl font-bold text-warm-800" x-text="fmtNum(Object.values(users).reduce((s,u)=>s+(u.total_messages||0),0))"></p>
+        </div>
+      </div>
+
+      <!-- 用户列表 -->
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <h2 class="text-base font-bold text-warm-800 mb-4">👥 用户列表</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-warm-100 text-warm-500 text-left">
+                <th class="py-2 px-2">用户 ID</th>
+                <th class="py-2 px-2">昵称</th>
+                <th class="py-2 px-2">注册时间</th>
+                <th class="py-2 px-2">最后活跃</th>
+                <th class="py-2 px-2">今日消息</th>
+                <th class="py-2 px-2">总消息</th>
+                <th class="py-2 px-2">状态</th>
+                <th class="py-2 px-2">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(u, uid) in users" :key="uid">
+                <tr class="border-b border-warm-50 hover:bg-warm-50 transition cursor-pointer"
+                    @click="openUserDetail(uid)">
+                  <td class="py-2 px-2 font-mono text-xs" x-text="uid"></td>
+                  <td class="py-2 px-2" x-text="u.nickname||'-'"></td>
+                  <td class="py-2 px-2 text-xs" x-text="(u.created_at||'').slice(0,10)"></td>
+                  <td class="py-2 px-2 text-xs" x-text="(u.last_active||'').slice(0,16)"></td>
+                  <td class="py-2 px-2" x-text="u.message_count_today||0"></td>
+                  <td class="py-2 px-2" x-text="u.total_messages||0"></td>
+                  <td class="py-2 px-2">
+                    <span :class="u.status==='active'?'text-green-600':'text-red-500'" class="text-xs font-medium"
+                      x-text="u.status==='active'?'活跃':'已挂起'"></span>
+                  </td>
+                  <td class="py-2 px-2 space-x-1" @click.stop>
+                    <button x-show="u.status==='active'" @click="toggleStatus(uid,'suspend')"
+                      class="text-xs text-red-500 hover:underline">挂起</button>
+                    <button x-show="u.status!=='active'" @click="toggleStatus(uid,'activate')"
+                      class="text-xs text-green-600 hover:underline">激活</button>
+                    <button @click="openSkillPanel(uid)"
+                      class="text-xs text-warm-600 hover:underline">技能</button>
+                    <button @click="generateToken(uid)"
+                      class="text-xs text-blue-600 hover:underline">令牌</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Tab: 系统操作 ============ -->
+    <div x-show="activeTab==='system'" class="space-y-4">
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <h2 class="text-base font-bold text-warm-800 mb-4">⚙️ 系统操作面板</h2>
+        <p class="text-xs text-warm-500 mb-4">手动触发定时任务或系统动作，谨慎操作。</p>
+        <div class="grid md:grid-cols-2 gap-4">
+          <!-- 操作选择 -->
+          <div>
+            <label class="text-sm text-warm-600 block mb-1">选择动作</label>
+            <select x-model="sysAction.action" class="w-full px-3 py-2 border rounded-lg text-sm outline-none" style="border-color:#eaddd7">
+              <optgroup label="系统维护">
+                <option value="refresh_cache">🔄 刷新缓存 + 清理过期令牌</option>
+                <option value="daily_init">📅 每日初始化</option>
+                <option value="scheduler_tick">⏰ 调度器 Tick</option>
+              </optgroup>
+              <optgroup label="定时推送">
+                <option value="morning_report">🌅 早间问候</option>
+                <option value="evening_checkin">🌙 晚间签到</option>
+                <option value="daily_report">📝 每日总结</option>
+                <option value="todo_remind">✅ 待办提醒</option>
+                <option value="nudge_check">👋 陪伴检查</option>
+                <option value="companion_check">💬 陪伴推送</option>
+              </optgroup>
+              <optgroup label="定期报告">
+                <option value="reflect_push">💭 深度自问</option>
+                <option value="mood_generate">🎭 情绪日记</option>
+                <option value="weekly_review">📊 周回顾</option>
+                <option value="monthly_review">📈 月度回顾</option>
+              </optgroup>
+            </select>
+          </div>
+          <!-- 目标用户 -->
+          <div>
+            <label class="text-sm text-warm-600 block mb-1">目标用户（空 = 所有活跃用户）</label>
+            <select x-model="sysAction.userId" class="w-full px-3 py-2 border rounded-lg text-sm outline-none" style="border-color:#eaddd7">
+              <option value="">全部活跃用户</option>
+              <template x-for="(u, uid) in users" :key="uid">
+                <option :value="uid" x-text="uid + (u.nickname ? ' ('+u.nickname+')' : '')"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+        <div class="mt-4 flex items-center gap-3">
+          <button @click="triggerAction()" :disabled="sysAction.running"
+            class="px-5 py-2 text-sm text-white rounded-lg transition disabled:opacity-50"
+            style="background:#977669">
+            <span x-show="!sysAction.running">🚀 执行</span>
+            <span x-show="sysAction.running">执行中...</span>
+          </button>
+          <span x-show="sysAction.result" class="text-xs" :class="sysAction.resultOk?'text-green-600':'text-red-500'"
+                x-text="sysAction.result"></span>
+        </div>
+        <!-- 执行结果详情 -->
+        <div x-show="sysAction.details" class="mt-3 bg-warm-50 rounded-lg p-3 text-xs font-mono max-h-40 overflow-y-auto"
+             x-text="sysAction.details"></div>
+      </div>
+    </div>
+
+    <!-- ============ Tab: 邀请码 ============ -->
+    <div x-show="activeTab==='invite'" class="space-y-4">
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-warm-800">🎫 邀请码管理</h2>
+          <button @click="createInviteCode()" class="px-4 py-2 text-sm text-white rounded-lg transition" style="background:#977669">
+            + 生成邀请码
+          </button>
+        </div>
+        <div x-show="inviteCodes.length===0" class="text-center py-8 text-warm-400 text-sm">暂无邀请码</div>
+        <div x-show="inviteCodes.length>0" class="space-y-2">
+          <template x-for="code in inviteCodes" :key="code.code">
+            <div class="flex items-center justify-between p-3 bg-warm-50 rounded-lg">
+              <div>
+                <span class="font-mono text-sm font-bold text-warm-800" x-text="code.code"></span>
+                <span class="ml-2 text-xs" :class="code.used ? 'text-warm-400' : 'text-green-600'"
+                      x-text="code.used ? '已使用 ('+code.used_by+')' : '未使用'"></span>
+              </div>
+              <div class="flex items-center gap-2 text-xs text-warm-500">
+                <span x-text="'创建: '+(code.created_at||'').slice(0,16)"></span>
+                <button x-show="!code.used" @click="copyText(code.code)" class="text-blue-600 hover:underline">复制</button>
+                <button x-show="!code.used" @click="deleteInviteCode(code.code)" class="text-red-500 hover:underline">删除</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Tab: 公告 & 反馈 ============ -->
+    <div x-show="activeTab==='announce'" class="space-y-4">
+      <!-- 公告管理 -->
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-warm-800">📢 系统公告</h2>
+          <button @click="announcePanel.editing=true;announcePanel.title='';announcePanel.content=''"
+            class="px-4 py-2 text-sm text-white rounded-lg transition" style="background:#977669">
+            + 发布公告
+          </button>
+        </div>
+        <!-- 编辑表单 -->
+        <div x-show="announcePanel.editing" class="mb-4 p-4 bg-warm-50 rounded-lg space-y-3">
+          <input type="text" x-model="announcePanel.title" placeholder="公告标题"
+            class="w-full px-3 py-2 border rounded-lg text-sm outline-none" style="border-color:#eaddd7">
+          <textarea x-model="announcePanel.content" placeholder="公告内容" rows="3"
+            class="w-full px-3 py-2 border rounded-lg text-sm outline-none resize-none" style="border-color:#eaddd7"></textarea>
+          <div class="flex gap-2">
+            <button @click="publishAnnouncement()" class="px-4 py-2 text-sm text-white rounded-lg transition" style="background:#977669">发布</button>
+            <button @click="announcePanel.editing=false" class="px-4 py-2 text-sm text-warm-500 rounded-lg hover:bg-warm-100">取消</button>
+          </div>
+        </div>
+        <!-- 公告列表 -->
+        <div x-show="announcements.length===0 && !announcePanel.editing" class="text-center py-8 text-warm-400 text-sm">暂无公告</div>
+        <template x-for="a in announcements" :key="a.id">
+          <div class="p-3 border-b border-warm-100 last:border-0">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-medium text-warm-800" x-text="a.title"></h3>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-warm-400" x-text="(a.created_at||'').slice(0,16)"></span>
+                <button @click="deleteAnnouncement(a.id)" class="text-xs text-red-500 hover:underline">删除</button>
+              </div>
+            </div>
+            <p class="text-xs text-warm-600 mt-1" x-text="a.content"></p>
+          </div>
+        </template>
+      </div>
+
+      <!-- 用户反馈 -->
+      <div class="bg-white rounded-xl p-5 shadow-sm">
+        <h2 class="text-base font-bold text-warm-800 mb-4">💬 用户反馈</h2>
+        <div x-show="feedbacks.length===0" class="text-center py-8 text-warm-400 text-sm">暂无反馈</div>
+        <template x-for="fb in feedbacks" :key="fb.id">
+          <div class="p-3 border-b border-warm-100 last:border-0">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono text-warm-500" x-text="fb.user_id"></span>
+              <span class="text-xs text-warm-400" x-text="(fb.created_at||'').slice(0,16)"></span>
+            </div>
+            <p class="text-sm text-warm-800 mt-1" x-text="fb.content"></p>
+            <!-- 回复 -->
+            <div x-show="fb.reply" class="mt-2 pl-3 border-l-2 border-warm-200">
+              <p class="text-xs text-warm-600" x-text="'管理员回复: '+fb.reply"></p>
+            </div>
+            <div x-show="!fb.reply" class="mt-2 flex gap-2">
+              <input type="text" :id="'reply_'+fb.id" placeholder="输入回复..."
+                class="flex-1 px-2 py-1 border rounded text-xs outline-none" style="border-color:#eaddd7">
+              <button @click="replyFeedback(fb.id)" class="text-xs text-white px-3 py-1 rounded" style="background:#977669">回复</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 用户详情弹窗 ============ -->
+  <div x-show="userDetail.open" x-cloak class="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+       @click.self="userDetail.open=false">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col">
+      <div class="flex items-center justify-between p-5 border-b border-warm-100">
+        <h3 class="text-base font-bold text-warm-800">
+          👤 <span x-text="userDetail.uid"></span>
+          <span x-show="userDetail.data?.config?.nickname" class="text-warm-500 text-sm font-normal ml-1"
+                x-text="'('+userDetail.data?.config?.nickname+')'"></span>
+        </h3>
+        <button @click="userDetail.open=false" class="text-warm-400 hover:text-warm-700 text-lg">&times;</button>
+      </div>
+
+      <div x-show="userDetail.loading" class="p-10 text-center text-warm-400">加载中...</div>
+
+      <div x-show="!userDetail.loading && userDetail.data" class="p-5 overflow-y-auto flex-1 space-y-5">
+        <!-- 基本信息 -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-warm-50 rounded-lg p-3">
+            <p class="text-xs text-warm-500">引导阶段</p>
+            <p class="text-sm font-medium text-warm-800" x-text="['完成','等昵称','等首条笔记','等首个待办'][userDetail.data?.config?.onboarding_step||0]"></p>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <p class="text-xs text-warm-500">存储模式</p>
+            <p class="text-sm font-medium text-warm-800" x-text="userDetail.data?.config?.storage_mode||'local'"></p>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <p class="text-xs text-warm-500">文件数 / 存储</p>
+            <p class="text-sm font-medium text-warm-800"
+              x-text="(userDetail.data?.storage?.file_count||0)+' 个 / '+(userDetail.data?.storage?.total_size_mb||0)+' MB'"></p>
+          </div>
+          <div class="bg-warm-50 rounded-lg p-3">
+            <p class="text-xs text-warm-500">LLM 调用</p>
+            <p class="text-sm font-medium text-warm-800"
+              x-text="(userDetail.data?.token_usage?.calls||0)+' 次 / '+fmtNum(userDetail.data?.token_usage?.total_tokens||0)+' tokens'"></p>
+          </div>
+        </div>
+
+        <!-- 状态概览 -->
+        <div class="bg-warm-50 rounded-lg p-3">
+          <h4 class="text-xs font-bold text-warm-600 mb-2">📊 State 概览</h4>
+          <div class="grid grid-cols-2 gap-2 text-xs">
+            <div><span class="text-warm-500">打卡连续:</span> <span class="text-warm-800" x-text="userDetail.data?.state_summary?.nudge_streak||0"></span> 天</div>
+            <div><span class="text-warm-500">情绪评分数:</span> <span class="text-warm-800" x-text="userDetail.data?.state_summary?.mood_scores_count||0"></span></div>
+            <div><span class="text-warm-500">最近日报:</span> <span class="text-warm-800" x-text="userDetail.data?.state_summary?.last_daily_report||'-'"></span></div>
+            <div><span class="text-warm-500">最近周报:</span> <span class="text-warm-800" x-text="userDetail.data?.state_summary?.last_weekly_review||'-'"></span></div>
+          </div>
+        </div>
+
+        <!-- 偏好设置（可编辑） -->
+        <div class="bg-warm-50 rounded-lg p-3">
+          <h4 class="text-xs font-bold text-warm-600 mb-2">⚙️ 偏好设置</h4>
+          <div class="flex flex-wrap gap-3 text-xs">
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" :checked="userDetail.data?.config?.preferences?.morning_report"
+                @change="updateUserPref('morning_report', $event.target.checked)" class="accent-warm-700">
+              <span>早间问候</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" :checked="userDetail.data?.config?.preferences?.evening_checkin"
+                @change="updateUserPref('evening_checkin', $event.target.checked)" class="accent-warm-700">
+              <span>晚间签到</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer">
+              <input type="checkbox" :checked="userDetail.data?.config?.preferences?.companion_enabled"
+                @change="updateUserPref('companion_enabled', $event.target.checked)" class="accent-warm-700">
+              <span>陪伴推送</span>
+            </label>
+          </div>
+          <div class="mt-2 flex items-center gap-2 text-xs">
+            <span class="text-warm-500">每日消息限额:</span>
+            <input type="number" :value="userDetail.data?.config?.daily_message_limit||50"
+              @change="updateUserLimit($event.target.value)"
+              class="w-16 px-2 py-1 border rounded text-center outline-none" style="border-color:#eaddd7" min="1" max="500">
+          </div>
+        </div>
+
+        <!-- 最近决策日志 -->
+        <div>
+          <h4 class="text-xs font-bold text-warm-600 mb-2">📋 最近决策（最新 20 条）</h4>
+          <div class="space-y-1 max-h-60 overflow-y-auto">
+            <template x-for="d in (userDetail.data?.decisions||[])" :key="d.ts">
+              <div class="flex items-start gap-2 px-3 py-2 bg-warm-50 rounded-lg text-xs cursor-pointer"
+                   @click="d._expanded = !d._expanded">
+                <span class="text-warm-400 whitespace-nowrap" x-text="(d.ts||'').slice(11,19)"></span>
+                <span class="font-mono px-1.5 py-0.5 rounded bg-warm-200 text-warm-700" x-text="d.skill||'?'"></span>
+                <span class="text-warm-600 truncate flex-1" x-text="d.input||'-'"></span>
+                <span :class="d.elapsed_s>8?'text-red-500':d.elapsed_s>3?'text-yellow-600':'text-green-600'"
+                      x-text="(d.elapsed_s||0).toFixed(1)+'s'"></span>
+              </div>
+            </template>
+          </div>
+          <div x-show="!(userDetail.data?.decisions||[]).length" class="text-center py-4 text-warm-400 text-xs">暂无决策记录</div>
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-warm-100 flex justify-end gap-3">
+        <button @click="generateToken(userDetail.uid)" class="px-4 py-2 text-sm text-blue-600 rounded-lg hover:bg-blue-50">
+          🔗 生成令牌
+        </button>
+        <button @click="userDetail.open=false" class="px-4 py-2 text-sm text-warm-500 rounded-lg hover:bg-warm-50">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Skill 配置弹窗 ============ -->
+  <div x-show="skillPanel.open" x-cloak class="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+       @click.self="skillPanel.open=false">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+      <div class="flex items-center justify-between p-5 border-b border-warm-100">
+        <h3 class="text-base font-bold text-warm-800">
+          <span x-text="skillPanel.uid"></span> — 技能配置
+        </h3>
+        <button @click="skillPanel.open=false" class="text-warm-400 hover:text-warm-700 text-lg">&times;</button>
+      </div>
+
+      <div class="p-5 overflow-y-auto flex-1 space-y-4">
+        <div class="flex items-center gap-4">
+          <span class="text-sm text-warm-600">过滤模式：</span>
+          <label class="flex items-center gap-1 text-sm cursor-pointer">
+            <input type="radio" value="blacklist" x-model="skillPanel.mode" class="accent-warm-700">
+            <span>黑名单</span>
+          </label>
+          <label class="flex items-center gap-1 text-sm cursor-pointer">
+            <input type="radio" value="whitelist" x-model="skillPanel.mode" class="accent-warm-700">
+            <span>白名单</span>
+          </label>
+        </div>
+
+        <div>
+          <label class="text-sm text-warm-600 block mb-1">
+            <span x-text="skillPanel.mode==='blacklist'?'禁用列表（黑名单中的技能将被屏蔽）':'启用列表（仅白名单中的技能可用）'"></span>
+          </label>
+          <input type="text" x-model="skillPanel.listText" placeholder="多个用英文逗号分隔，支持通配符如 finance.*"
+            class="w-full px-3 py-2 border rounded-lg text-sm outline-none" style="border-color:#eaddd7">
+        </div>
+
+        <div>
+          <p class="text-sm text-warm-600 mb-2">已注册技能：</p>
+          <div class="space-y-1 max-h-60 overflow-y-auto">
+            <template x-for="s in skillPanel.skills" :key="s.name">
+              <div class="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs"
+                   :class="s.allowed ? 'bg-green-50' : 'bg-red-50'">
+                <span class="font-mono" x-text="s.name"></span>
+                <div class="flex items-center gap-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px]"
+                    :class="{'bg-green-100 text-green-700': s.visibility==='public',
+                              'bg-red-100 text-red-700': s.visibility==='private',
+                              'bg-yellow-100 text-yellow-700': s.visibility==='preview'}"
+                    x-text="s.visibility"></span>
+                  <span :class="s.allowed?'text-green-600':'text-red-400'"
+                    x-text="s.allowed?'可用':'屏蔽'"></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-warm-100 flex justify-end gap-3">
+        <button @click="skillPanel.open=false" class="px-4 py-2 text-sm text-warm-500 rounded-lg hover:bg-warm-50">取消</button>
+        <button @click="saveSkillConfig()" class="px-4 py-2 text-sm text-white rounded-lg transition" style="background:#977669">
+          <span x-show="!skillPanel.saving">保存</span>
+          <span x-show="skillPanel.saving">保存中...</span>
+        </button>
+      </div>
+      <p x-show="skillPanel.msg" class="px-5 pb-3 text-xs" :class="skillPanel.msgOk?'text-green-600':'text-red-500'"
+         x-text="skillPanel.msg"></p>
+    </div>
+  </div>
+
+<script>
+function adminApp() {
+  return {
+    authed: false, adminToken: '', authError: '',
+    users: {},
+    activeTab: 'users',
+    tabs: [
+      { key: 'users', label: '👥 用户管理' },
+      { key: 'system', label: '⚙️ 系统操作' },
+      // { key: 'invite', label: '🎫 邀请码' },  // 暂时屏蔽
+      { key: 'announce', label: '📢 公告 & 反馈' },
+    ],
+    toast: { show: false, msg: '', ok: true },
+    // Skill 面板
+    skillPanel: { open: false, uid: '', mode: 'blacklist', listText: '', skills: [], saving: false, msg: '', msgOk: false },
+    // 用户详情
+    userDetail: { open: false, uid: '', loading: false, data: null },
+    // 系统操作
+    sysAction: { action: 'refresh_cache', userId: '', running: false, result: '', resultOk: false, details: '' },
+    // 邀请码
+    inviteCodes: [],
+    // 公告 & 反馈
+    announcements: [],
+    feedbacks: [],
+    announcePanel: { editing: false, title: '', content: '' },
+
+    showToast(msg, ok=true) {
+      this.toast = { show: true, msg, ok };
+      setTimeout(() => this.toast.show = false, 3000);
+    },
+
+    async _fetch(url, opts={}) {
+      opts.headers = { ...opts.headers, 'X-Admin-Token': this.adminToken };
+      return fetch(url, opts);
+    },
+
+    async login() {
+      this.authError = '';
+      try {
+        const r = await fetch('/api/admin/users', { headers: {'X-Admin-Token': this.adminToken} });
+        if (r.status === 403) { this.authError = '密钥错误'; return; }
+        const d = await r.json();
+        this.users = d.users || {};
+        localStorage.setItem('karvis_admin_token', this.adminToken);
+        this.authed = true;
+        this.loadInviteCodes();
+        this.loadAnnouncements();
+        this.loadFeedbacks();
+      } catch(e) { this.authError = '网络错误'; }
+    },
+    async init() {
+      const saved = localStorage.getItem('karvis_admin_token');
+      if (saved) { this.adminToken = saved; await this.login(); }
+    },
+    fmtNum(n) {
+      if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+      return String(n);
+    },
+
+    // ---- 用户管理 ----
+    async toggleStatus(uid, action) {
+      try {
+        await this._fetch(`/api/admin/users/${uid}/${action}`, { method: 'POST' });
+        const r = await this._fetch('/api/admin/users');
+        this.users = (await r.json()).users || {};
+        this.showToast(`${action==='suspend'?'已挂起':'已激活'} ${uid}`);
+      } catch(e) { this.showToast('操作失败', false); }
+    },
+
+    async openUserDetail(uid) {
+      this.userDetail = { open: true, uid, loading: true, data: null };
+      try {
+        const r = await this._fetch(`/api/admin/users/${uid}/detail`);
+        this.userDetail.data = await r.json();
+        this.userDetail.loading = false;
+      } catch(e) {
+        this.userDetail.loading = false;
+        this.showToast('加载用户详情失败', false);
+      }
+    },
+
+    async generateToken(uid) {
+      try {
+        const r = await this._fetch(`/api/admin/users/${uid}/token`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expire_hours: 72 })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          await navigator.clipboard.writeText(d.web_url);
+          this.showToast(`令牌已生成并复制到剪贴板（72h 有效）`);
+        } else {
+          this.showToast(d.error || '生成失败', false);
+        }
+      } catch(e) { this.showToast('生成失败', false); }
+    },
+
+    async updateUserPref(key, value) {
+      const uid = this.userDetail.uid;
+      try {
+        await this._fetch(`/api/admin/users/${uid}/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferences: { [key]: value } })
+        });
+        this.showToast('偏好已更新');
+      } catch(e) { this.showToast('更新失败', false); }
+    },
+
+    async updateUserLimit(value) {
+      const uid = this.userDetail.uid;
+      try {
+        await this._fetch(`/api/admin/users/${uid}/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ daily_message_limit: parseInt(value) })
+        });
+        this.showToast('限额已更新');
+      } catch(e) { this.showToast('更新失败', false); }
+    },
+
+    // ---- Skill 面板 ----
+    async openSkillPanel(uid) {
+      const sp = { open: true, uid, mode: 'blacklist', listText: '', skills: [], saving: false, msg: '', msgOk: false };
+      this.skillPanel = sp;
+      try {
+        const r = await this._fetch(`/api/admin/users/${uid}/skills`);
+        const d = await r.json();
+        sp.mode = d.mode || 'blacklist';
+        sp.listText = (d.list || []).join(', ');
+        sp.skills = d.skills || [];
+      } catch(e) { sp.msg = '加载失败'; sp.msgOk = false; }
+    },
+    async saveSkillConfig() {
+      this.skillPanel.saving = true;
+      this.skillPanel.msg = '';
+      const uid = this.skillPanel.uid;
+      const list = this.skillPanel.listText.split(',').map(s => s.trim()).filter(Boolean);
+      try {
+        const r = await this._fetch(`/api/admin/users/${uid}/skills`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: this.skillPanel.mode, list })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          const r2 = await this._fetch(`/api/admin/users/${uid}/skills`);
+          const d2 = await r2.json();
+          this.skillPanel.skills = d2.skills || [];
+          this.skillPanel.listText = (d2.list || []).join(', ');
+          this.skillPanel.mode = d2.mode || 'blacklist';
+          this.skillPanel.msg = '保存成功';
+          this.skillPanel.msgOk = true;
+        } else {
+          this.skillPanel.msg = d.error || '保存失败';
+          this.skillPanel.msgOk = false;
+        }
+      } catch(e) {
+        this.skillPanel.msg = '网络错误';
+        this.skillPanel.msgOk = false;
+      }
+      this.skillPanel.saving = false;
+    },
+
+    // ---- 系统操作 ----
+    async triggerAction() {
+      this.sysAction.running = true;
+      this.sysAction.result = '';
+      this.sysAction.details = '';
+      try {
+        const r = await this._fetch('/api/admin/system/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: this.sysAction.action, user_id: this.sysAction.userId })
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.sysAction.result = '✅ 执行成功';
+          this.sysAction.resultOk = true;
+          this.sysAction.details = JSON.stringify(d, null, 2);
+        } else {
+          this.sysAction.result = '❌ ' + (d.error || '执行失败');
+          this.sysAction.resultOk = false;
+          this.sysAction.details = JSON.stringify(d, null, 2);
+        }
+      } catch(e) {
+        this.sysAction.result = '❌ 网络错误';
+        this.sysAction.resultOk = false;
+      }
+      this.sysAction.running = false;
+    },
+
+    // ---- 邀请码 ----
+    async loadInviteCodes() {
+      try {
+        const r = await this._fetch('/api/admin/invite-codes');
+        if (r.ok) {
+          const d = await r.json();
+          this.inviteCodes = d.codes || [];
+        }
+      } catch(e) {}
+    },
+    async createInviteCode() {
+      try {
+        const r = await this._fetch('/api/admin/invite-codes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this.showToast('邀请码已生成: ' + d.code);
+          this.loadInviteCodes();
+        }
+      } catch(e) { this.showToast('生成失败', false); }
+    },
+    async deleteInviteCode(code) {
+      if (!confirm('确定删除此邀请码？')) return;
+      try {
+        const r = await this._fetch(`/api/admin/invite-codes/${code}`, { method: 'DELETE' });
+        if (r.ok) { this.showToast('已删除'); this.loadInviteCodes(); }
+      } catch(e) { this.showToast('删除失败', false); }
+    },
+    copyText(text) {
+      navigator.clipboard.writeText(text).then(() => this.showToast('已复制'));
+    },
+
+    // ---- 公告 ----
+    async loadAnnouncements() {
+      try {
+        const r = await this._fetch('/api/admin/announcements');
+        if (r.ok) {
+          const d = await r.json();
+          this.announcements = d.announcements || [];
+        }
+      } catch(e) {}
+    },
+    async publishAnnouncement() {
+      const { title, content } = this.announcePanel;
+      if (!title.trim()) { this.showToast('请输入标题', false); return; }
+      try {
+        const r = await this._fetch('/api/admin/announcements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, content })
+        });
+        if (r.ok) {
+          this.showToast('公告已发布');
+          this.announcePanel.editing = false;
+          this.loadAnnouncements();
+        }
+      } catch(e) { this.showToast('发布失败', false); }
+    },
+    async deleteAnnouncement(id) {
+      if (!confirm('确定删除此公告？')) return;
+      try {
+        const r = await this._fetch(`/api/admin/announcements/${id}`, { method: 'DELETE' });
+        if (r.ok) { this.showToast('已删除'); this.loadAnnouncements(); }
+      } catch(e) { this.showToast('删除失败', false); }
+    },
+
+    // ---- 反馈 ----
+    async loadFeedbacks() {
+      try {
+        const r = await this._fetch('/api/admin/feedbacks');
+        if (r.ok) {
+          const d = await r.json();
+          this.feedbacks = d.feedbacks || [];
+        }
+      } catch(e) {}
+    },
+    async replyFeedback(id) {
+      const input = document.getElementById('reply_' + id);
+      const reply = input?.value?.trim();
+      if (!reply) return;
+      try {
+        const r = await this._fetch(`/api/admin/feedbacks/${id}/reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reply })
+        });
+        if (r.ok) {
+          this.showToast('已回复');
+          this.loadFeedbacks();
+        }
+      } catch(e) { this.showToast('回复失败', false); }
+    },
+  }
+}
+</script>
+</body>
+</html>

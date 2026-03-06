@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Karvis — 你的 AI 生活助手</title>
+  <meta name="description" content="基于企业微信的 AI 生活助手。记速记、管待办、写日记、追情绪、养习惯——通过对话完成一切。">
+  <meta property="og:title" content="Karvis — 你的 AI 生活助手">
+  <meta property="og:description" content="发条消息，剩下的交给 AI。速记、待办、日记、情绪追踪，全在企业微信里完成。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://karvis.top">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦞</text></svg>">
+  <style>
+    /* ============ Reset & Base ============ */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0a0a;
+      --bg-card: #111111;
+      --bg-card-hover: #181818;
+      --text: #e8e8e8;
+      --text-secondary: #888888;
+      --accent: #ffffff;
+      --accent-dim: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.08);
+      --gradient-start: #ffffff;
+      --gradient-end: #666666;
+      --max-w: 800px;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans SC', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    ::selection {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ============ Nav ============ */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 20px 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(10,10,10,0.8);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      transition: background 0.3s;
+    }
+
+    .nav-logo {
+      font-size: 1.2rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+
+    .nav-links a {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      transition: color 0.2s;
+      letter-spacing: 0.01em;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-cta {
+      font-size: 0.85rem !important;
+      color: var(--bg) !important;
+      background: var(--text);
+      padding: 8px 20px;
+      border-radius: 6px;
+      font-weight: 500;
+      transition: opacity 0.2s !important;
+    }
+
+    .nav-cta:hover { opacity: 0.85; }
+
+    /* ============ Hero ============ */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 140px 24px 100px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -40%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      margin-bottom: 40px;
+      background: var(--accent-dim);
+    }
+
+    .hero-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4ade80;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.8rem, 7vw, 5rem);
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -0.04em;
+      background: linear-gradient(180deg, var(--gradient-start) 30%, var(--gradient-end) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      max-width: 700px;
+      margin-bottom: 28px;
+    }
+
+    .hero p {
+      font-size: clamp(1.05rem, 2vw, 1.2rem);
+      color: var(--text-secondary);
+      max-width: 520px;
+      line-height: 1.8;
+      margin-bottom: 48px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: #fff;
+      color: #0a0a0a;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 30px rgba(255,255,255,0.1);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 32px;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-weight: 500;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .btn-secondary:hover {
+      background: var(--accent-dim);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    /* ============ Section Common ============ */
+    section {
+      padding: 120px 24px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+
+    .section-title {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+
+    .section-desc {
+      font-size: 1.05rem;
+      color: var(--text-secondary);
+      line-height: 1.8;
+      max-width: 560px;
+    }
+
+    /* ============ Chat Demo ============ */
+    .demo-section {
+      padding: 80px 24px 120px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .chat-window {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .chat-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chat-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #333 0%, #555 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+    }
+
+    .chat-name {
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    .chat-status {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    .chat-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-size: 0.92rem;
+      line-height: 1.6;
+      animation: msgIn 0.4s ease-out both;
+    }
+
+    .msg-user {
+      align-self: flex-end;
+      background: #2a2a2a;
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg-ai {
+      align-self: flex-start;
+      background: var(--accent-dim);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .msg-ai .msg-label {
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    @keyframes msgIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg:nth-child(1) { animation-delay: 0.2s; }
+    .msg:nth-child(2) { animation-delay: 0.6s; }
+    .msg:nth-child(3) { animation-delay: 1.0s; }
+    .msg:nth-child(4) { animation-delay: 1.4s; }
+    .msg:nth-child(5) { animation-delay: 1.8s; }
+
+    /* ============ Features ============ */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 16px;
+      margin-top: 48px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px 28px;
+      transition: background 0.25s, border-color 0.25s;
+    }
+
+    .feature-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(255,255,255,0.15);
+    }
+
+    .feature-icon {
+      font-size: 1.6rem;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.88rem;
+      color: var(--text-secondary);
+      line-height: 1.65;
+    }
+
+    /* ============ How It Works ============ */
+    .steps {
+      margin-top: 56px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .step {
+      display: flex;
+      gap: 28px;
+      align-items: flex-start;
+      position: relative;
+      padding-bottom: 48px;
+    }
+
+    .step:last-child { padding-bottom: 0; }
+
+    .step-indicator {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .step-number {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+
+    .step-line {
+      width: 1px;
+      flex: 1;
+      background: var(--border);
+      margin-top: 8px;
+    }
+
+    .step:last-child .step-line { display: none; }
+
+    .step-content { padding-top: 8px; }
+
+    .step-content h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .step-content p {
+      font-size: 0.92rem;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    /* ============ Numbers ============ */
+    .numbers {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+
+    .number-card {
+      text-align: center;
+      padding: 36px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+
+    .number-value {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(180deg, #fff 20%, #888 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .number-label {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-top: 8px;
+    }
+
+    /* ============ Tech Stack ============ */
+    .tech-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 32px;
+    }
+
+    .tech-tag {
+      padding: 8px 18px;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 0.84rem;
+      color: var(--text-secondary);
+      background: var(--accent-dim);
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .tech-tag:hover {
+      border-color: rgba(255,255,255,0.25);
+      color: var(--text);
+    }
+
+    /* ============ CTA ============ */
+    .cta-section {
+      text-align: center;
+      padding: 120px 24px 140px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+      position: relative;
+    }
+
+    .cta-section::before {
+      content: '';
+      position: absolute;
+      bottom: 20%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(255,255,255,0.02) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .cta-section h2 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      margin-bottom: 20px;
+      background: linear-gradient(180deg, var(--gradient-start) 30%, var(--gradient-end) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .cta-section p {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      margin-bottom: 40px;
+      max-width: 480px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.8;
+    }
+
+    /* ============ Footer ============ */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+      text-align: center;
+    }
+
+    footer p {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+    }
+
+    footer a {
+      color: var(--text-secondary);
+      transition: color 0.2s;
+    }
+
+    footer a:hover { color: var(--text); }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    /* ============ Divider ============ */
+    .divider {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      border: none;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ============ Responsive ============ */
+    @media (max-width: 640px) {
+      nav { padding: 16px 20px; }
+      .nav-links { gap: 20px; }
+      .nav-links .nav-link-text { display: none; }
+      .features-grid { grid-template-columns: 1fr; }
+      .numbers { grid-template-columns: 1fr; }
+      .hero { padding: 120px 20px 80px; }
+      section { padding: 80px 20px; }
+      .hero-actions { flex-direction: column; align-items: center; }
+      .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
+    }
+
+    /* ============ Scroll Reveal ============ */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-logo">Karvis</div>
+  <div class="nav-links">
+    <a href="#features" class="nav-link-text">功能</a>
+    <a href="#how" class="nav-link-text">使用方式</a>
+    <a href="https://api.karvis.top/web/login" class="nav-cta">登录面板</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="hero-badge-dot"></span>
+    开源 · 可自部署 · 数据在你手中
+  </div>
+  <h1>发条消息<br>剩下的交给 AI</h1>
+  <p>基于企业微信的 AI 生活助手。速记、待办、日记、情绪追踪、习惯养成——通过对话完成一切，2-5 人共享一套部署。</p>
+  <div class="hero-actions">
+    <a href="#how" class="btn-primary">开始使用 →</a>
+    <a href="https://github.com/sameencai/KarvisForYou" target="_blank" class="btn-secondary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      GitHub
+    </a>
+  </div>
+</section>
+
+<!-- Chat Demo -->
+<div class="demo-section reveal">
+  <div class="chat-window">
+    <div class="chat-header">
+      <div class="chat-avatar">K</div>
+      <div>
+        <div class="chat-name">Karvis 助手</div>
+        <div class="chat-status">企业微信 · 在线</div>
+      </div>
+    </div>
+    <div class="chat-body">
+      <div class="msg msg-user">帮我记一下：下周三和阿里的人开会讨论合作方案</div>
+      <div class="msg msg-ai">
+        <div class="msg-label">Karvis</div>
+        已记录速记 ✅ 并创建待办：「下周三和阿里开会讨论合作方案」，到时候我会提醒你。
+      </div>
+      <div class="msg msg-user">今天的心情不太好，项目延期了</div>
+      <div class="msg msg-ai">
+        <div class="msg-label">Karvis</div>
+        已记录你的心情 💙 项目延期确实让人焦虑，但这只是暂时的。今天的情绪日记我会帮你写好。
+      </div>
+      <div class="msg msg-user">给我看看这周的待办</div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- Features -->
+<section id="features" class="reveal">
+  <span class="section-label">功能</span>
+  <h2 class="section-title">不只是聊天机器人</h2>
+  <p class="section-desc">Karvis 是你的第二大脑。每一条消息都会被理解、分类、结构化，变成你可回溯的人生记录。</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <span class="feature-icon">📝</span>
+      <h3>速记</h3>
+      <p>发消息自动记录。文字、语音、图片、链接——想到什么说什么，Karvis 帮你整理归档。</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">✅</span>
+      <h3>待办管理</h3>
+      <p>「帮我记个待办」就够了。自动提取时间、创建提醒，到点准时通知你。</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">📖</span>
+      <h3>自动日记</h3>
+      <p>每晚自动复盘你一天说过的话，生成结构化日报。周报、月报也帮你写好。</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">😊</span>
+      <h3>情绪追踪</h3>
+      <p>AI 感知你的情绪起伏，生成 30 天情绪曲线。了解自己，从记录开始。</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">📚</span>
+      <h3>读书 & 影视笔记</h3>
+      <p>看完一本书、一部电影，随口说一句感想，自动归档到对应分类。</p>
+    </div>
+    <div class="feature-card">
+      <span class="feature-icon">🔒</span>
+      <h3>多用户隔离</h3>
+      <p>2-5 人共享部署，每人独立数据空间。你看不到别人的，别人也看不到你的。</p>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- How It Works -->
+<section id="how" class="reveal">
+  <span class="section-label">使用方式</span>
+  <h2 class="section-title">三步开始</h2>
+  <p class="section-desc">不需要复杂的配置，不需要学习新工具。在你每天都在用的企业微信里，直接开始。</p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-indicator">
+        <div class="step-number">1</div>
+        <div class="step-line"></div>
+      </div>
+      <div class="step-content">
+        <h3>部署到你的服务器</h3>
+        <p>一行 Docker 命令启动，或用一键脚本在自己电脑上试运行。支持腾讯云轻量服务器、任意 Linux 机器。最低 1 核 1G 即可。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-indicator">
+        <div class="step-number">2</div>
+        <div class="step-line"></div>
+      </div>
+      <div class="step-content">
+        <h3>连接企业微信</h3>
+        <p>在企业微信管理后台创建一个应用，填入回调地址。Karvis 就住在这个应用里，像同事一样出现在你的聊天列表中。</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-indicator">
+        <div class="step-number">3</div>
+        <div class="step-line"></div>
+      </div>
+      <div class="step-content">
+        <h3>发条消息就开始</h3>
+        <p>打开企微，给 Karvis 发「你好」。它会引导你完成设置，然后你就拥有了一个 7×24 在线的 AI 生活助手。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- Numbers -->
+<section class="reveal">
+  <span class="section-label">设计理念</span>
+  <h2 class="section-title">为真实生活而造</h2>
+  <p class="section-desc">不是又一个 ChatGPT 套壳。Karvis 专为「用对话管理生活」设计，每一个功能都经过真实场景验证。</p>
+
+  <div class="numbers">
+    <div class="number-card">
+      <div class="number-value">49</div>
+      <div class="number-label">个内置技能</div>
+    </div>
+    <div class="number-card">
+      <div class="number-value">¥45</div>
+      <div class="number-label">起 / 月运行成本</div>
+    </div>
+    <div class="number-card">
+      <div class="number-value">100%</div>
+      <div class="number-label">数据自主可控</div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- Tech -->
+<section class="reveal">
+  <span class="section-label">技术栈</span>
+  <h2 class="section-title">简单可靠的架构</h2>
+  <p class="section-desc">没有复杂的中间件，没有外部数据库依赖。纯文件存储，备份只需复制一个目录。</p>
+
+  <div class="tech-tags">
+    <span class="tech-tag">Python / Flask</span>
+    <span class="tech-tag">DeepSeek V3</span>
+    <span class="tech-tag">企业微信 API</span>
+    <span class="tech-tag">Docker</span>
+    <span class="tech-tag">Nginx</span>
+    <span class="tech-tag">Let's Encrypt</span>
+    <span class="tech-tag">纯文件存储</span>
+    <span class="tech-tag">零数据库依赖</span>
+  </div>
+</section>
+
+<!-- CTA -->
+<div class="cta-section reveal">
+  <h2>开始记录你的生活</h2>
+  <p>开源免费，数据完全在你自己的服务器上。<br>部署一次，长期使用。</p>
+  <div class="hero-actions">
+    <a href="https://github.com/sameencai/KarvisForYou" target="_blank" class="btn-primary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      查看源码
+    </a>
+    <a href="https://api.karvis.top/web/login" class="btn-secondary">登录面板 →</a>
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-links">
+    <a href="https://github.com/sameencai/KarvisForYou" target="_blank">GitHub</a>
+    <a href="https://api.karvis.top/web/admin">管理后台</a>
+    <a href="mailto:contact@karvis.top">联系我们</a>
+  </div>
+  <p>© 2026 Karvis. 开源项目，MIT 许可证。</p>
+</footer>
+
+<!-- Scroll Reveal -->
+<script>
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

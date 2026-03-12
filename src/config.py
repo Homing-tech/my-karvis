@@ -11,6 +11,11 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v3.2")
 
+# ============ Gemini API (可选，留空则不启用) ============
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_BASE_URL = os.environ.get("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
 # ============ Qwen Flash API (Tier 1: Flash) ============
 QWEN_API_KEY = os.environ.get("QWEN_API_KEY", "")
 QWEN_BASE_URL = os.environ.get("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")

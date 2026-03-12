@@ -20,6 +20,7 @@ except ImportError:
 
 from config import (
     DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL,
+    GEMINI_API_KEY, GEMINI_BASE_URL, GEMINI_MODEL,
     QWEN_API_KEY, QWEN_BASE_URL, QWEN_MODEL, QWEN_VL_MODEL,
     CHECKIN_TIMEOUT_SECONDS, SCHEDULER_RHYTHM_WINDOW,
     ADMIN_USER_ID, ALERT_SLOW_THRESHOLD, ALERT_SLOW_CONSECUTIVE,
@@ -148,6 +149,8 @@ def _check_monthly_budget():
                     ct = e.get("completion_tokens", 0)
                     if "deepseek" in m:
                         month_cost += pt / 1e6 * 2 + ct / 1e6 * 8
+                    elif "gemini" in m:
+                        month_cost += pt / 1e6 * 0.5 + ct / 1e6 * 2
                     elif "vl" in m:
                         month_cost += pt / 1e6 * 3 + ct / 1e6 * 9
                 except (json.JSONDecodeError, KeyError):
@@ -255,18 +258,25 @@ def _get_skill_registry():
 def _select_model_tier(payload, is_system_action=False, action=None):
     """
     根据请求类型选择模型层级。
-    Returns: "flash" | "main" | "think"
+    Returns: "flash" | "main" | "think" | "gemini"
+    
+    路由策略：
+    - 如果配置了 GEMINI_API_KEY，用户消息和定时任务走 Gemini
+    - 未配置 Gemini 时，行为不变（Main = DeepSeek）
+    - Flash 和 Think 不受影响
     """
+    _use_gemini = bool(GEMINI_API_KEY)
+
     if is_system_action:
         if action in ("morning_report", "evening_checkin",
                        "daily_report", "weekly_review", "monthly_review"):
-            return "main"
+            return "gemini" if _use_gemini else "main"
         if action == "companion_check":
             return "flash"
-        return "main"
+        return "gemini" if _use_gemini else "main"
 
-    # 用户消息: 走 Main（一次调用完成分类+回复）
-    return "main"
+    # 用户消息: 优先走 Gemini，没配置则走 DeepSeek Main
+    return "gemini" if _use_gemini else "main"
 
 
 def _select_skill_model_tier(skill_name):
@@ -279,10 +289,10 @@ def _select_skill_model_tier(skill_name):
 def call_llm(messages, model_tier="main", max_tokens=500,
              temperature=0.3, enable_thinking=None):
     """
-    统一 LLM 调用入口，支持三层模型路由 + 自动降级。
+    统一 LLM 调用入口，支持多层模型路由 + 自动降级。
     
     Args:
-        model_tier: "flash" | "main" | "think"
+        model_tier: "flash" | "main" | "think" | "gemini"
         enable_thinking: 覆盖 thinking 设置。None = 按 tier 自动决定
     Returns:
         str: LLM 回复文本，失败返回 None
@@ -290,6 +300,14 @@ def call_llm(messages, model_tier="main", max_tokens=500,
     try:
         if model_tier == "flash":
             return _call_qwen_flash(messages, max_tokens, temperature)
+
+        if model_tier == "gemini":
+            if GEMINI_API_KEY:
+                return _call_gemini(messages, max_tokens, temperature)
+            else:
+                _log("[Brain] Gemini 未配置 API Key，降级到 DeepSeek Main")
+                return _call_deepseek(messages, max_tokens, temperature,
+                                      enable_thinking=False)
 
         thinking = enable_thinking
         if thinking is None:
@@ -300,6 +318,14 @@ def call_llm(messages, model_tier="main", max_tokens=500,
     except Exception as e:
         if model_tier == "flash":
             _log(f"[Brain] Qwen Flash 失败: {e}, 降级到 DeepSeek")
+            try:
+                return _call_deepseek(messages, max_tokens, temperature,
+                                      enable_thinking=False)
+            except Exception as e2:
+                _log(f"[Brain] DeepSeek 降级也失败: {e2}")
+                return None
+        if model_tier == "gemini":
+            _log(f"[Brain] Gemini 失败: {e}, 降级到 DeepSeek")
             try:
                 return _call_deepseek(messages, max_tokens, temperature,
                                       enable_thinking=False)
@@ -384,6 +410,41 @@ def _call_qwen_flash(messages, max_tokens=500, temperature=0.3):
 
     _log(f"[Brain][Flash] Qwen API 错误: {resp.status_code} - {resp.text[:200]}")
     raise RuntimeError(f"Qwen API {resp.status_code}")
+
+
+def _call_gemini(messages, max_tokens=500, temperature=0.3):
+    """调用 Gemini（Google AI），兼容 OpenAI API 格式"""
+    url = f"{GEMINI_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GEMINI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": GEMINI_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature
+    }
+
+    total_chars = sum(len(m.get("content", "")) for m in messages)
+    _log(f"[Brain][Gemini] 请求: model={GEMINI_MODEL}, "
+         f"prompt_chars={total_chars}, max_tokens={max_tokens}")
+
+    t0 = _time.time()
+    resp = requests.post(url, headers=headers, json=data, timeout=60)
+    t1 = _time.time()
+
+    if resp.status_code == 200:
+        result = resp.json()
+        usage = result.get("usage", {})
+        _log(f"[Brain][Gemini] 响应: {t1-t0:.1f}s, "
+             f"prompt_tokens={usage.get('prompt_tokens')}, "
+             f"completion_tokens={usage.get('completion_tokens')}")
+        _log_llm_usage("gemini", GEMINI_MODEL, usage, t1 - t0)
+        return result["choices"][0]["message"]["content"]
+
+    _log(f"[Brain][Gemini] API 错误: {resp.status_code} - {resp.text[:200]}")
+    raise RuntimeError(f"Gemini API {resp.status_code}")
 
 
 def _call_qwen_vl(image_base64, prompt=None):

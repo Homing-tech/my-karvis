@@ -900,12 +900,14 @@ def api_admin_stats():
     # 今日汇总
     today_stats = token_daily.get(today_str, {"prompt": 0, "completion": 0, "total": 0, "calls": 0})
 
-    # 成本估算 (DeepSeek: 输入¥2/M 输出¥8/M, Qwen Flash: 免费, Qwen VL: 输入¥3/M 输出¥9/M)
+    # 成本估算 (DeepSeek: 输入¥2/M 输出¥8/M, Qwen Flash: 免费, Qwen VL: 输入¥3/M 输出¥9/M, Gemini: 输入¥0.5/M 输出¥2/M)
     total_cost = 0.0
     for model, stats in token_by_model.items():
         m = model.lower()
         if "deepseek" in m:
             total_cost += stats["prompt"] / 1e6 * 2 + stats["completion"] / 1e6 * 8
+        elif "gemini" in m:
+            total_cost += stats["prompt"] / 1e6 * 0.5 + stats["completion"] / 1e6 * 2
         elif "vl" in m or "vl-max" in m:
             total_cost += stats["prompt"] / 1e6 * 3 + stats["completion"] / 1e6 * 9
         # qwen-flash 免费
@@ -918,6 +920,8 @@ def api_admin_stats():
             ct = e.get("completion_tokens", 0)
             if "deepseek" in m:
                 today_cost += pt / 1e6 * 2 + ct / 1e6 * 8
+            elif "gemini" in m:
+                today_cost += pt / 1e6 * 0.5 + ct / 1e6 * 2
             elif "vl" in m:
                 today_cost += pt / 1e6 * 3 + ct / 1e6 * 9
 
@@ -984,6 +988,8 @@ def api_admin_stats():
             ct = e.get("completion_tokens", 0)
             if "deepseek" in m:
                 month_cost += pt / 1e6 * 2 + ct / 1e6 * 8
+            elif "gemini" in m:
+                month_cost += pt / 1e6 * 0.5 + ct / 1e6 * 2
             elif "vl" in m:
                 month_cost += pt / 1e6 * 3 + ct / 1e6 * 9
 

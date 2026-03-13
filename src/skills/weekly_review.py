@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 Skill: weekly.review
-每周自动生成周回顾：从过去 7 天数据中发现模式、关联和情绪趋势。
-写入 01-Daily/周报-{起始日期}.md
+周度开悟报告：基于过去 7 天 daily_report 数据，生成深度总结。
+
+核心逻辑：
+1. 数据聚合：汇总 7 天成就按「生存/成长/享受」三维分类 + 趋势对比
+2. 模式识别：检索所有认知改写记录，寻找反复纠结的主题，给出破局点
+3. 输出格式：Markdown + Emoji + 开悟金句
 
 数据源：
-1. Quick-Notes（7 天条目）
-2. 归档笔记（emotion/fun/work 各天 + 碎碎念）
-3. Daily Note（日报 + 打卡）
-4. 情绪日记（mood_score + key_moments）
-5. 决策日志（skill 使用统计）
-6. state.mood_scores（情绪评分数组）
+1. 7 天 Daily Note（日报总结 + 打卡）
+2. Quick-Notes / 碎碎念 / 归档笔记
+3. 情绪评分（state.mood_scores）
+4. 上周数据（用于趋势对比）
 """
 import sys
 import json
@@ -26,10 +28,10 @@ def _log(msg):
 
 def execute(params, state, ctx):
     """
-    生成周回顾。
+    生成周度开悟报告。
 
     params:
-        date: str — 可选，指定周日日期 YYYY-MM-DD，默认本周日（如果今天不是周日则取上周日）
+        date: str — 可选，指定周日日期 YYYY-MM-DD，默认最近的周日
     """
     date_str = (params.get("date") or "").strip()
     if not date_str:
@@ -39,7 +41,7 @@ def execute(params, state, ctx):
         sunday = today - timedelta(days=days_since_sunday)
         date_str = sunday.strftime("%Y-%m-%d")
 
-    # 计算周一到周日
+    # 计算本周一到周日
     try:
         end_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:
@@ -49,50 +51,63 @@ def execute(params, state, ctx):
     period_str = f"{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}"
     dates = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 
-    _log(f"[weekly.review] 生成周报: {period_str}")
+    # 上周日期范围（用于趋势对比）
+    last_week_end = start_date - timedelta(days=1)
+    last_week_start = last_week_end - timedelta(days=6)
+    last_week_dates = [(last_week_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 
-    # 1. 并发收集 7 天数据
-    data = _collect_week_data(dates, state, ctx)
+    _log(f"[weekly.review] 生成周度开悟报告: {period_str}")
 
-    if not data["notes"].strip():
+    # 1. 收集本周 + 上周数据
+    this_week_data = _collect_week_data(dates, state, ctx)
+    last_week_data = _collect_week_data(last_week_dates, state, ctx)
+
+    if not this_week_data["notes"].strip():
         _log("[weekly.review] 本周没有记录")
-        return {"success": True, "reply": f"本周（{period_str}）没有记录，无法生成周报"}
+        return {"success": True, "reply": f"本周（{period_str}）没有记录，无法生成开悟报告"}
 
-    # 2. AI 分析
+    # 2. 预处理：提取量化对比数据
+    comparison = _build_comparison(this_week_data, last_week_data)
+
+    # 3. AI 分析
     from brain import call_deepseek
-    analysis = _ai_analyze_week(data, period_str, dates, call_deepseek)
+    analysis = _ai_analyze_enlightenment(this_week_data, comparison, period_str, call_deepseek)
 
     if not analysis:
-        return {"success": False, "reply": "AI 周报分析失败"}
+        return {"success": False, "reply": "AI 分析失败，开悟报告生成中止"}
 
-    # 3. 构建 Markdown
-    review_md = _build_weekly_review(period_str, start_date.strftime("%Y-%m-%d"), analysis, data)
+    # 补充量化数据
+    analysis["activity_summary"] = analysis.get("activity_summary", comparison)
 
-    # 4. 写入文件
+    # 4. 构建 Markdown（文件版）
+    review_md = _build_enlightenment_report(period_str, start_date.strftime("%Y-%m-%d"), analysis, this_week_data)
+
+    # 5. 写入文件
     file_path = f"{ctx.daily_notes_dir}/周报-{start_date.strftime('%Y-%m-%d')}.md"
     ok = _write_weekly_review(ctx, file_path, review_md)
 
     if ok:
-        _log(f"[weekly.review] 周报已写入: {file_path}")
-        mood_avg = analysis.get("mood_avg", "?")
-        insight = analysis.get("insight", "")[:60]
-        return {
-            "success": True,
-            "reply": f"📅 周回顾已生成（{period_str}）\n情绪均分：{mood_avg}/10\n{insight}"
-        }
+        _log(f"[weekly.review] 开悟报告已写入: {file_path}")
+        # 6. 构建企微发送版
+        reply = _build_enlightenment_for_send(period_str, analysis)
+        # 保存到 state
+        state["last_weekly_review"] = date_str
+        return {"success": True, "reply": reply}
     else:
-        return {"success": False, "reply": "周报写入失败"}
+        return {"success": False, "reply": "开悟报告写入失败"}
 
+
+# ============================================================
+# 数据收集
+# ============================================================
 
 def _collect_week_data(dates, state, ctx):
     """并发收集 7 天的所有数据"""
     from concurrent.futures import ThreadPoolExecutor
 
-    # 构建要读取的文件列表
     files_to_read = {
         "quick_notes": ctx.quick_notes_file,
         "misc": ctx.misc_file,
-        "decisions": ctx.decision_log_file,
     }
     for d in dates:
         files_to_read[f"daily_{d}"] = f"{ctx.daily_notes_dir}/{d}.md"
@@ -100,7 +115,6 @@ def _collect_week_data(dates, state, ctx):
         files_to_read[f"fun_{d}"] = f"{ctx.fun_notes_dir}/{d}.md"
         files_to_read[f"work_{d}"] = f"{ctx.work_notes_dir}/{d}.md"
 
-    # 并发读取（复用 brain 的全局线程池）
     results = {}
     try:
         from brain import _executor
@@ -116,9 +130,11 @@ def _collect_week_data(dates, state, ctx):
         except Exception:
             results[k] = ""
 
-    # 组装各天的笔记
+    # 组装各天的笔记 + 提取日报分析数据
     all_parts = []
-    day_summaries = {}
+    daily_reports = []  # 存放每天的日报结构化数据
+    total_notes = 0
+    total_done = 0
 
     for d in dates:
         day_parts = []
@@ -127,12 +143,14 @@ def _collect_week_data(dates, state, ctx):
         qn_entries = _extract_date_entries(results["quick_notes"], d)
         if qn_entries:
             day_parts.append(qn_entries)
+            total_notes += qn_entries.count("\n## ") + (1 if qn_entries.startswith("## ") else 0)
 
         # 归档笔记
         for key, label in [("emotion", "情感"), ("fun", "趣事"), ("work", "工作")]:
             content = results.get(f"{key}_{d}", "").strip()
             if content:
                 day_parts.append(f"[{label}] {content[:500]}")
+                total_notes += 1
 
         # 碎碎念该日条目
         misc_entries = _extract_date_entries(results["misc"], d)
@@ -142,13 +160,22 @@ def _collect_week_data(dates, state, ctx):
         # Daily Note（日报+打卡）
         daily = results.get(f"daily_{d}", "").strip()
         if daily:
+            report_data = _extract_daily_report_data(daily, d)
+            if report_data:
+                daily_reports.append(report_data)
+                total_done += report_data.get("done_count", 0)
+
             # 提取日报总结
             if "## 📊 今日总结" in daily:
                 summary_section = daily.split("## 📊 今日总结")[1]
-                end_idx = summary_section.find("\n## ")
+                end_idx = summary_section.find("\n## 📝 原始记录")
                 if end_idx >= 0:
                     summary_section = summary_section[:end_idx]
-                day_parts.append(f"[日报] {summary_section.strip()[:400]}")
+                elif "\n## " in summary_section:
+                    end_idx = summary_section.find("\n## ")
+                    summary_section = summary_section[:end_idx]
+                day_parts.append(f"[日报] {summary_section.strip()[:600]}")
+
             # 提取打卡
             if "## 每日复盘" in daily:
                 checkin_section = daily.split("## 每日复盘")[1]
@@ -160,7 +187,6 @@ def _collect_week_data(dates, state, ctx):
         if day_parts:
             day_text = "\n".join(day_parts)
             all_parts.append(f"=== {d} ===\n{day_text}")
-            day_summaries[d] = day_text
 
     notes = "\n\n".join(all_parts)
 
@@ -170,14 +196,12 @@ def _collect_week_data(dates, state, ctx):
         if entry.get("date") in dates:
             mood_scores.append(entry)
 
-    # 提取决策日志统计
-    decision_stats = _extract_decision_stats(results["decisions"], dates)
-
     return {
         "notes": notes,
-        "day_summaries": day_summaries,
+        "daily_reports": daily_reports,
         "mood_scores": mood_scores,
-        "decision_stats": decision_stats,
+        "total_notes": total_notes,
+        "total_done": total_done,
         "dates": dates,
     }
 
@@ -195,62 +219,138 @@ def _extract_date_entries(text, date_str):
     return "\n\n".join(entries)
 
 
-def _extract_decision_stats(text, dates):
-    """从 JSONL 决策日志中统计本周 skill 使用分布"""
-    if not text:
-        return {}
-    date_set = set(dates)
-    skill_counts = {}
-    total = 0
-    for line in text.strip().split("\n"):
+def _extract_daily_report_data(daily_content, date_str):
+    """从日报 Markdown 中提取结构化数据（情绪洞察、认知改写、done_list 等）"""
+    data = {"date": date_str, "done_count": 0}
+
+    # 提取情绪洞察
+    if "🧠 情绪洞察" in daily_content:
+        for line in daily_content.split("\n"):
+            if "🧠 情绪洞察" in line:
+                insight = line.split("🧠 情绪洞察")[1].strip().lstrip(":").lstrip("*:：").strip()
+                data["puma_insight"] = insight
+                break
+
+    # 提取认知改写
+    if "💡 认知改写" in daily_content:
+        for line in daily_content.split("\n"):
+            if "💡 认知改写" in line:
+                rewrite = line.split("💡 认知改写")[1].strip().lstrip(":").lstrip("*:：").strip()
+                data["cognitive_rewrite"] = rewrite
+                break
+
+    # 统计 done_list（✅ 开头的条目）
+    done_count = 0
+    done_items = []
+    for line in daily_content.split("\n"):
         line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-            ts = entry.get("ts", "")
-            if ts[:10] in date_set:
-                skill = entry.get("skill", "unknown")
-                skill_counts[skill] = skill_counts.get(skill, 0) + 1
-                total += 1
-        except Exception:
-            pass
-    return {"skill_counts": skill_counts, "total_decisions": total}
+        if "✅" in line and not line.startswith("#"):
+            done_count += 1
+            # 提取文本内容
+            text = line.split("✅")[-1].strip()
+            if text:
+                done_items.append(text)
+    data["done_count"] = done_count
+    data["done_items"] = done_items
+
+    # 提取情绪评分
+    if "●" in daily_content and "/10" in daily_content:
+        import re
+        match = re.search(r"(\d+(?:\.\d+)?)/10", daily_content)
+        if match:
+            try:
+                data["mood_score"] = float(match.group(1))
+            except ValueError:
+                pass
+
+    return data
 
 
-def _ai_analyze_week(data, period_str, dates, call_deepseek):
-    """调用 AI 分析周数据"""
+# ============================================================
+# 量化对比
+# ============================================================
+
+def _build_comparison(this_week, last_week):
+    """构建本周 vs 上周的量化对比"""
+    this_notes = this_week.get("total_notes", 0)
+    last_notes = last_week.get("total_notes", 0) if last_week["notes"].strip() else None
+    this_done = this_week.get("total_done", 0)
+    last_done = last_week.get("total_done", 0) if last_week["notes"].strip() else None
+
+    return {
+        "this_week_notes": this_notes,
+        "last_week_notes": last_notes,
+        "this_week_done": this_done,
+        "last_week_done": last_done,
+    }
+
+
+# ============================================================
+# AI 分析
+# ============================================================
+
+def _ai_analyze_enlightenment(data, comparison, period_str, call_deepseek):
+    """调用 AI 生成周度开悟报告分析"""
     import prompts
 
-    parts = [f"分析以下 {period_str} 一周的记录，生成周回顾。"]
+    # 组装本周数据
+    parts = []
+
+    # 日报结构化数据（重点：情绪洞察 + 认知改写）
+    if data["daily_reports"]:
+        parts.append("【本周日报摘要】")
+        for report in data["daily_reports"]:
+            d = report.get("date", "?")
+            score = report.get("mood_score", "?")
+            insight = report.get("puma_insight", "无")
+            rewrite = report.get("cognitive_rewrite", "无")
+            done_items = report.get("done_items", [])
+            done_str = "、".join(done_items[:5]) if done_items else "无记录"
+            parts.append(f"📅 {d} | 情绪:{score}/10 | 成就:{done_str}")
+            if insight != "无":
+                parts.append(f"  🧠 情绪洞察: {insight}")
+            if rewrite != "无":
+                parts.append(f"  💡 认知改写: {rewrite}")
 
     # 情绪评分
     if data["mood_scores"]:
         parts.append("\n【情绪评分数据】")
         for s in data["mood_scores"]:
-            parts.append(f"- {s.get('date','?')}: {s.get('score','?')}/10 ({s.get('source','?')}) {s.get('label','')}")
+            parts.append(f"- {s.get('date', '?')}: {s.get('score', '?')}/10 {s.get('label', '')}")
 
-    # 决策统计
-    stats = data["decision_stats"]
-    if stats.get("total_decisions"):
-        parts.append(f"\n【本周互动统计】共 {stats['total_decisions']} 次决策")
-        for skill, count in sorted(stats["skill_counts"].items(), key=lambda x: -x[1])[:10]:
-            parts.append(f"- {skill}: {count}次")
+    # 量化对比
+    parts.append(f"\n【量化对比】")
+    parts.append(f"- 本周笔记数: {comparison['this_week_notes']}")
+    if comparison['last_week_notes'] is not None:
+        parts.append(f"- 上周笔记数: {comparison['last_week_notes']}")
+    parts.append(f"- 本周完成事项: {comparison['this_week_done']}")
+    if comparison['last_week_done'] is not None:
+        parts.append(f"- 上周完成事项: {comparison['last_week_done']}")
 
-    # 各天记录
+    # 原始笔记（截断）
     if data["notes"]:
-        # 截断到合理长度（7 天数据可能很长）
-        notes_text = data["notes"][:6000]
-        parts.append(f"\n【本周记录】\n{notes_text}")
+        notes_text = data["notes"][:5000]
+        parts.append(f"\n【本周原始记录】\n{notes_text}")
 
-    parts.append(prompts.WEEKLY_JSON_FORMAT)
+    weekly_data = "\n".join(parts)
 
-    prompt = "\n".join(parts)
+    # 额外上下文
+    extra_parts = []
+    if comparison['last_week_notes'] is not None:
+        extra_parts.append(f"- 上周笔记数 {comparison['last_week_notes']}，本周 {comparison['this_week_notes']}")
+    if comparison['last_week_done'] is not None:
+        extra_parts.append(f"- 上周完成事项 {comparison['last_week_done']}，本周 {comparison['this_week_done']}")
+    extra_context = "\n".join(extra_parts) if extra_parts else ""
+
+    user_prompt = prompts.get("WEEKLY_ENLIGHTENMENT_USER",
+                              period_str=period_str,
+                              weekly_data=weekly_data,
+                              extra_context=extra_context)
 
     response = call_deepseek([
-        {"role": "system", "content": prompts.WEEKLY_SYSTEM},
-        {"role": "user", "content": prompt}
-    ], max_tokens=1200, temperature=0.7)
+        {"role": "system", "content": prompts.WEEKLY_ENLIGHTENMENT_SYSTEM},
+        {"role": "user", "content": user_prompt}
+    ], max_tokens=2000, temperature=0.7)
 
     if not response:
         return None
@@ -271,136 +371,280 @@ def _ai_analyze_week(data, period_str, dates, call_deepseek):
                 return json.loads(text[start:end + 1])
             except Exception:
                 pass
-    _log(f"[weekly.review] AI 分析 JSON 解析失败: {text[:200]}")
+    _log(f"[weekly.review] AI 开悟报告 JSON 解析失败: {text[:300]}")
     return None
 
 
-def _build_weekly_review(period_str, start_date_str, analysis, data):
-    """构建周回顾 Markdown"""
+# ============================================================
+# Markdown 构建（文件版 · 写入 01-Daily/周报-{date}.md）
+# ============================================================
+
+def _build_enlightenment_report(period_str, start_date_str, analysis, data):
+    """构建周度开悟报告 Markdown（文件版）"""
+    weekly_summary = analysis.get("weekly_summary", "")
     mood_trend = analysis.get("mood_trend", [])
     mood_avg = analysis.get("mood_avg", "?")
-    connections = analysis.get("connections", [])
-    stats = analysis.get("stats", {})
-    insight = analysis.get("insight", "")
-    suggestions = analysis.get("suggestions", [])
+    trend_analysis = analysis.get("trend_analysis", "")
+    achievements = analysis.get("achievements", {})
+    pattern = analysis.get("pattern_recognition", {})
+    breakthrough = analysis.get("breakthrough", {})
+    golden_quote = analysis.get("golden_quote", "")
+    activity = analysis.get("activity_summary", {})
 
     lines = [
         "---",
-        "type: weekly-review",
+        "type: weekly-enlightenment",
         f"period: {period_str}",
         f"mood_avg: {mood_avg}",
         "generated: true",
         "---",
         "",
-        f"# 📅 周回顾 · {period_str}",
+        f"# 🧘 周度开悟报告 · {period_str}",
         "",
     ]
 
-    # 情绪曲线
+    # ─── 本周总结 ───
+    if weekly_summary:
+        lines.extend([
+            "## 📖 本周回顾",
+            "",
+            weekly_summary,
+            "",
+        ])
+
+    # ─── 情绪曲线 ───
     lines.extend([
         "## 🌡️ 情绪曲线",
         "",
-        "| 日期 | 评分 | 来源 | 关键词 |",
-        "|------|:----:|------|--------|",
+        "| 日期 | 评分 | 关键词 |",
+        "|------|:----:|--------|",
     ])
 
-    # 用 mood_scores 中的 source 补充
-    score_map = {s.get("date"): s for s in data.get("mood_scores", [])}
     for item in mood_trend:
         d = item.get("date", "")
         score = item.get("score")
         keyword = item.get("keyword", "")
-        # 匹配完整日期
-        full_date = None
-        for date_str in data.get("dates", []):
-            if date_str.endswith(d) or d in date_str:
-                full_date = date_str
-                break
-        source_info = score_map.get(full_date, {})
-        source = source_info.get("source", "AI")
         score_str = str(score) if score is not None else "-"
-        lines.append(f"| {d} | {score_str} | {source} | {keyword} |")
+        lines.append(f"| {d} | {score_str} | {keyword} |")
 
-    # 找最高最低
-    valid_scores = [item for item in mood_trend if item.get("score") is not None]
-    if valid_scores:
-        highest = max(valid_scores, key=lambda x: x["score"])
-        lowest = min(valid_scores, key=lambda x: x["score"])
+    # 趋势分析
+    lines.append("")
+    lines.append(f"📊 **平均情绪**: {mood_avg}/10")
+    if trend_analysis:
+        lines.append(f"📈 {trend_analysis}")
+    lines.append("")
+
+    # ─── 三维成就 ───
+    lines.extend([
+        "## 🏆 本周成就 · 三维视角",
+        "",
+    ])
+
+    survival = achievements.get("survival", [])
+    growth = achievements.get("growth", [])
+    enjoyment = achievements.get("enjoyment", [])
+
+    if survival:
+        lines.append("### 🛡️ 生存（基本功）")
+        for item in survival:
+            lines.append(f"- ✅ {item}")
         lines.append("")
-        lines.append(f"平均：{mood_avg} · 最高：{highest['date']}({highest['score']}) · 最低：{lowest['date']}({lowest['score']})")
-    lines.append("")
 
-    # 碎片连线
-    if connections:
-        lines.append("## 🔗 碎片连线")
+    if growth:
+        lines.append("### 🌱 成长（突破区）")
+        for item in growth:
+            lines.append(f"- 🚀 {item}")
         lines.append("")
-        for i, conn in enumerate(connections, 1):
-            title = conn.get("title", "")
-            detail = conn.get("detail", "")
-            lines.append(f"{i}. **{title}**：{detail}")
-            lines.append("")
 
-    # 数据统计
-    lines.append("## 📊 数据统计")
-    lines.append("")
+    if enjoyment:
+        lines.append("### 🎉 享受（滋养区）")
+        for item in enjoyment:
+            lines.append(f"- 🌈 {item}")
+        lines.append("")
 
-    total_messages = stats.get("total_messages", 0)
-    categories = stats.get("categories", {})
-    top_people = stats.get("top_people", [])
-    keywords = stats.get("keywords", [])
+    # ─── 模式识别 ───
+    recurring = pattern.get("recurring_theme", "")
+    cognitive_patterns = pattern.get("cognitive_patterns", [])
+    deep_insight = pattern.get("deep_insight", "")
 
-    lines.append(f"- 本周消息数：{total_messages} 条")
-    if categories:
-        cat_parts = [f"{_cat_label(k)} {v}" for k, v in categories.items()]
-        lines.append(f"- 归档分类：{' · '.join(cat_parts)}")
-    if top_people:
-        people_parts = [f"{p['name']}({p['count']}次)" for p in top_people]
-        lines.append(f"- 提及最多的人：{'、'.join(people_parts)}")
-    if keywords:
-        lines.append(f"- 关键词：{' · '.join(keywords)}")
+    lines.extend([
+        "## 🔍 模式识别",
+        "",
+    ])
 
-    # 决策统计
-    decision_stats = data.get("decision_stats", {})
-    if decision_stats.get("total_decisions"):
-        lines.append(f"- 互动次数：{decision_stats['total_decisions']} 次")
+    if recurring:
+        lines.append(f"**🔄 本周反复主题**: {recurring}")
+        lines.append("")
 
-    lines.append("")
+    if cognitive_patterns:
+        lines.append("**🧩 认知模式**:")
+        for p in cognitive_patterns:
+            lines.append(f"- {p}")
+        lines.append("")
 
-    # 本周洞察
-    if insight:
+    if deep_insight:
+        lines.append(f"> 💭 {deep_insight}")
+        lines.append("")
+
+    # ─── 破局点 ───
+    if breakthrough:
+        point = breakthrough.get("point", "")
+        why = breakthrough.get("why", "")
+        how = breakthrough.get("how", "")
+
         lines.extend([
-            "## 💡 本周洞察",
+            "## 🎯 下周破局点",
             "",
-            insight,
+            f"**💡 {point}**",
+            "",
+        ])
+        if why:
+            lines.append(f"为什么：{why}")
+        if how:
+            lines.append(f"怎么做：{how}")
+        lines.append("")
+
+    # ─── 开悟金句 ───
+    if golden_quote:
+        lines.extend([
+            "## ✨ 本周开悟金句",
+            "",
+            f"> 🌟 **{golden_quote}**",
             "",
         ])
 
-    # 下周建议
-    if suggestions:
-        lines.extend([
-            "## 🎯 下周建议",
-            "",
-        ])
-        for s in suggestions:
-            lines.append(f"- [ ] {s}")
-        lines.append("")
+    # ─── 数据统计 ───
+    lines.extend([
+        "## 📊 数据统计",
+        "",
+        f"- 📝 本周笔记: {activity.get('this_week_notes', 0)} 条",
+        f"- ✅ 完成事项: {activity.get('this_week_done', 0)} 件",
+    ])
+    if activity.get("last_week_notes") is not None:
+        lines.append(f"- 📈 上周笔记: {activity['last_week_notes']} 条")
+    if activity.get("last_week_done") is not None:
+        lines.append(f"- 📈 上周完成: {activity['last_week_done']} 件")
+    lines.append("")
 
     # 尾部
     now_str = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M")
     lines.extend([
         "---",
         "",
-        f"*🤖 基于 {total_messages} 条消息 + {len(data.get('mood_scores', []))} 天情绪数据自动生成于 {now_str}*",
+        f"*🧘 周度开悟报告 · 自动生成于 {now_str}*",
     ])
 
     return "\n".join(lines)
 
 
-def _cat_label(key):
-    """归档分类 key → 中文标签"""
-    labels = {"fun": "生活趣事", "emotion": "情感日记", "work": "工作笔记", "misc": "碎碎念"}
-    return labels.get(key, key)
+# ============================================================
+# 企微发送版（精简，带 emoji 和视觉呼吸感）
+# ============================================================
 
+def _build_enlightenment_for_send(period_str, analysis):
+    """构建发送到企微的周度开悟报告"""
+    weekly_summary = analysis.get("weekly_summary", "")
+    mood_avg = analysis.get("mood_avg", "?")
+    trend_analysis = analysis.get("trend_analysis", "")
+    achievements = analysis.get("achievements", {})
+    pattern = analysis.get("pattern_recognition", {})
+    breakthrough = analysis.get("breakthrough", {})
+    golden_quote = analysis.get("golden_quote", "")
+    activity = analysis.get("activity_summary", {})
+
+    lines = [f"🧘 周度开悟报告", f"📅 {period_str}", ""]
+
+    # 本周总结
+    if weekly_summary:
+        lines.append(weekly_summary)
+        lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # 情绪趋势
+    lines.append(f"🌡️ 本周情绪均分: {mood_avg}/10")
+    if trend_analysis:
+        lines.append(f"📈 {trend_analysis}")
+    lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # 三维成就
+    lines.append("🏆 本周成就")
+    lines.append("")
+
+    survival = achievements.get("survival", [])
+    growth = achievements.get("growth", [])
+    enjoyment = achievements.get("enjoyment", [])
+
+    if survival:
+        lines.append("🛡️ 生存（基本功）")
+        for item in survival:
+            lines.append(f"  · {item}")
+    if growth:
+        lines.append("🌱 成长（突破区）")
+        for item in growth:
+            lines.append(f"  · {item}")
+    if enjoyment:
+        lines.append("🎉 享受（滋养区）")
+        for item in enjoyment:
+            lines.append(f"  · {item}")
+    lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # 模式识别
+    recurring = pattern.get("recurring_theme", "")
+    deep_insight = pattern.get("deep_insight", "")
+
+    lines.append("🔍 模式识别")
+    lines.append("")
+    if recurring:
+        lines.append(f"🔄 {recurring}")
+        lines.append("")
+    if deep_insight:
+        lines.append(f"💭 {deep_insight}")
+        lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # 破局点
+    if breakthrough:
+        point = breakthrough.get("point", "")
+        how = breakthrough.get("how", "")
+        lines.append("🎯 下周破局点")
+        lines.append("")
+        if point:
+            lines.append(f"💡 {point}")
+        if how:
+            lines.append(f"👉 {how}")
+        lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # 开悟金句
+    if golden_quote:
+        lines.append(f"✨ 本周开悟金句")
+        lines.append("")
+        lines.append(f"🌟 {golden_quote}")
+        lines.append("")
+
+    # 数据
+    notes_count = activity.get("this_week_notes", 0)
+    done_count = activity.get("this_week_done", 0)
+    lines.append(f"📊 本周数据: 📝 {notes_count} 条笔记 | ✅ {done_count} 件完成")
+
+    return "\n".join(lines).strip()
+
+
+# ============================================================
+# 文件写入
+# ============================================================
 
 def _write_weekly_review(ctx, file_path, content):
     """写入周报文件（覆盖式，每周只生成一份）"""

@@ -855,6 +855,35 @@ def process_endpoint():
         return "error"
 
 
+@app.route('/debug/process', methods=['POST'])
+def debug_process_endpoint():
+    """临时调试端点：同步执行 brain.process 并返回详细错误"""
+    import traceback as _tb
+    try:
+        data = request.get_json(force=True)
+        msg = data.get("msg", {})
+        user_id = data.get("user_id", "")
+        
+        # 获取用户上下文
+        ctx, is_new = get_or_create_user(user_id)
+        
+        # 构建 payload
+        payload = build_payload(msg, user_id)
+        if payload is None:
+            return jsonify({"error": "build_payload returned None"})
+        
+        # 直接调用 brain.process 并捕获异常
+        try:
+            result = brain.process(payload, send_fn=None, ctx=ctx)
+            return jsonify({"ok": True, "result": result})
+        except Exception as e:
+            tb_str = _tb.format_exc()
+            return jsonify({"error": str(e), "type": type(e).__name__, "traceback": tb_str})
+    except Exception as e:
+        tb_str = _tb.format_exc()
+        return jsonify({"error": str(e), "type": type(e).__name__, "traceback": tb_str})
+
+
 @app.route('/system', methods=['POST'])
 def system_endpoint():
     """系统端点：定时器/手动触发的 system action（支持多用户遍历）"""

@@ -855,58 +855,6 @@ def process_endpoint():
         return "error"
 
 
-@app.route('/debug/process', methods=['POST'])
-def debug_process_endpoint():
-    """临时调试端点：同步执行 brain.process 并返回详细错误"""
-    import traceback as _tb
-    import io as _io
-    import sys as _sys
-    
-    # 捕获 stderr
-    old_stderr = _sys.stderr
-    captured = _io.StringIO()
-    _sys.stderr = captured
-    
-    try:
-        data = request.get_json(force=True) or {}
-        user_id = data.get("user_id", "LiangHaoMing")
-        text = data.get("text", "你好")
-        
-        step = "get_or_create_user"
-        ctx, is_new = get_or_create_user(user_id)
-        
-        step = "build_payload"
-        payload = {
-            "type": "text",
-            "user_text": text,
-            "user_id": user_id,
-            "raw": text,
-        }
-        
-        step = "brain.process"
-        result = brain.process(payload, send_fn=None, ctx=ctx)
-        
-        _sys.stderr = old_stderr
-        stderr_output = captured.getvalue()
-        
-        return json.dumps({
-            "ok": True,
-            "result": str(result)[:2000],
-            "stderr": stderr_output[-3000:] if stderr_output else ""
-        }, ensure_ascii=False), 200, {"Content-Type": "application/json"}
-    except Exception as e:
-        _sys.stderr = old_stderr
-        stderr_output = captured.getvalue()
-        tb_str = _tb.format_exc()
-        return json.dumps({
-            "error": str(e),
-            "type": type(e).__name__,
-            "step": step,
-            "traceback": tb_str[-3000:],
-            "stderr": stderr_output[-3000:] if stderr_output else ""
-        }, ensure_ascii=False), 200, {"Content-Type": "application/json"}
-
-
 @app.route('/system', methods=['POST'])
 def system_endpoint():
     """系统端点：定时器/手动触发的 system action（支持多用户遍历）"""

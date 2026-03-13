@@ -861,24 +861,23 @@ def debug_process_endpoint():
     import traceback as _tb
     try:
         data = request.get_json(force=True)
-        msg = data.get("msg", {})
-        user_id = data.get("user_id", "")
+        user_id = data.get("user_id", "LiangHaoMing")
+        text = data.get("text", "你好")
         
         # 获取用户上下文
         ctx, is_new = get_or_create_user(user_id)
         
-        # 构建 payload
-        payload = build_payload(msg, user_id)
-        if payload is None:
-            return jsonify({"error": "build_payload returned None"})
+        # 直接构造简单 payload（跳过 build_payload）
+        payload = {
+            "type": "text",
+            "user_text": text,
+            "user_id": user_id,
+            "raw": text,
+        }
         
         # 直接调用 brain.process 并捕获异常
-        try:
-            result = brain.process(payload, send_fn=None, ctx=ctx)
-            return jsonify({"ok": True, "result": result})
-        except Exception as e:
-            tb_str = _tb.format_exc()
-            return jsonify({"error": str(e), "type": type(e).__name__, "traceback": tb_str})
+        result = brain.process(payload, send_fn=None, ctx=ctx)
+        return jsonify({"ok": True, "result": result})
     except Exception as e:
         tb_str = _tb.format_exc()
         return jsonify({"error": str(e), "type": type(e).__name__, "traceback": tb_str})

@@ -35,7 +35,7 @@ def execute(params, state, ctx):
     """
     date_str = (params.get("date") or "").strip()
     if not date_str:
-        # 默认以今天为结束日期，往前推 7 天
+        # 默认以今天为结束日期
         today = datetime.now(BEIJING_TZ).date()
         date_str = today.strftime("%Y-%m-%d")
 
@@ -44,7 +44,12 @@ def execute(params, state, ctx):
     except ValueError:
         return {"success": False, "reply": f"日期格式错误：{date_str}"}
 
-    start_date = end_date - timedelta(days=6)
+    # 如果 end_date 是周日，统计当周（周一~周日）
+    # 否则往前推 6 天凑满 7 天
+    if end_date.weekday() == 6:  # Sunday
+        start_date = end_date - timedelta(days=6)  # 本周一
+    else:
+        start_date = end_date - timedelta(days=6)
     period_str = f"{start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}"
     dates = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
 

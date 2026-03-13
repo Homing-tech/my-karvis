@@ -1057,8 +1057,10 @@ def _run_system_action_for_user(action, data, uid, ctx):
                 _state = read_state_cached(ctx) or {}
                 daily_top3 = _state.get("daily_top3", {})
                 today_str = datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
-                if daily_top3 and daily_top3.get("date") == today_str:
+                if daily_top3 and isinstance(daily_top3, dict) and daily_top3.get("date") == today_str:
                     context["daily_top3"] = daily_top3
+                elif daily_top3 and isinstance(daily_top3, list):
+                    context["daily_top3"] = {"items": daily_top3, "date": today_str}
             except Exception as e:
                 _log(f"[/system] [{uid}] daily_top3 读取失败: {e}")
 

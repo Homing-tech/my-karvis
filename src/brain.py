@@ -710,19 +710,30 @@ def _build_state_summary(state):
 
     # V3-F12: 每日 Top 3
     daily_top3 = state.get("daily_top3", {})
-    if daily_top3 and daily_top3.get("items"):
-        beijing_tz = timezone(timedelta(hours=8))
-        today_str = datetime.now(beijing_tz).strftime("%Y-%m-%d")
-        top3_date = daily_top3.get("date", "")
-        items = daily_top3["items"]
-        items_str = " / ".join(
-            f"{'✅' if i.get('done') else '⬜'} {i.get('text', '')}"
-            for i in items
-        )
-        if top3_date == today_str:
-            parts.append(f"今日 Top 3: {items_str}")
+    if daily_top3:
+        # 兼容 list 和 dict 两种格式
+        if isinstance(daily_top3, list):
+            items = daily_top3
+            top3_date = ""
+        elif isinstance(daily_top3, dict) and daily_top3.get("items"):
+            items = daily_top3["items"]
+            top3_date = daily_top3.get("date", "")
         else:
-            parts.append(f"昨日({top3_date}) Top 3: {items_str}")
+            items = []
+            top3_date = ""
+        if items:
+            beijing_tz = timezone(timedelta(hours=8))
+            today_str = datetime.now(beijing_tz).strftime("%Y-%m-%d")
+            items_str = " / ".join(
+                f"{'✅' if (i.get('done') if isinstance(i, dict) else False) else '⬜'} {(i.get('text', '') if isinstance(i, dict) else str(i))}"
+                for i in items
+            )
+            if top3_date == today_str:
+                parts.append(f"今日 Top 3: {items_str}")
+            elif top3_date:
+                parts.append(f"昨日({top3_date}) Top 3: {items_str}")
+            else:
+                parts.append(f"Top 3: {items_str}")
 
     # V3-F11: 活跃实验
     exp = state.get("active_experiment")

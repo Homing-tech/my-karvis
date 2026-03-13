@@ -1193,7 +1193,7 @@ _SIMPLE_SKILLS = frozenset({
     "checkin.start", "checkin.answer", "checkin.skip", "checkin.cancel",
     "book.create", "book.excerpt", "book.thought", "book.summary", "book.quotes",
     "media.create", "media.thought",
-    "mood.generate", "voice.journal",
+    "daily.generate", "mood.generate", "voice.journal",
     "settings.nickname", "settings.ai_name", "settings.soul", "settings.info",
     "web.token",
     "habit.propose", "habit.nudge", "habit.status", "habit.complete",

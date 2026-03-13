@@ -94,22 +94,8 @@ def execute(params, state, ctx):
 
     if ok:
         _log(f"[daily.generate] V2 日报已写入: {file_path}")
-        mood = analysis.get("mood", "")
-        summary = analysis.get("summary", "")[:60]
-        badge_str = " ".join(b["icon"] for b in analysis["badges"][:3]) if analysis["badges"] else ""
-        done_str = f"完成 {done_count} 件事"
-        if analysis["done_delta"] is not None:
-            delta = analysis["done_delta"]
-            if delta > 0:
-                done_str += f" (↑{delta})"
-            elif delta < 0:
-                done_str += f" (↓{abs(delta)})"
-            else:
-                done_str += " (持平)"
-
-        reply = f"{mood} 日报已生成\n\n{done_str} | 记录 {note_entries} 条\n{summary}"
-        if badge_str:
-            reply += f"\n今日勋章: {badge_str}"
+        # 构建发送到企微的三区块日报（不含原始记录）
+        reply = _build_daily_report_for_send(date_str, analysis)
         return {"success": True, "reply": reply}
     else:
         return {"success": False, "reply": "日报写入失败"}
@@ -435,6 +421,113 @@ def _build_daily_report_v2(date_str, analysis, notes):
     lines.extend(["", f"*🤖 AI 生成于 {datetime.now(BEIJING_TZ).strftime('%Y-%m-%d %H:%M')}*", ""])
 
     return "\n".join(lines)
+
+
+
+# ============================================================
+# 企微发送版日报（三区块，不含原始记录）
+# ============================================================
+
+def _build_daily_report_for_send(date_str, analysis):
+    """构建发送到企微的精简版三区块日报"""
+    mood = analysis.get("mood", "📝")
+    summary = analysis.get("summary", "")
+    mood_score = analysis.get("mood_score", "")
+    puma_insight = analysis.get("puma_insight", "")
+    rewrite = analysis.get("cognitive_rewrite", "")
+    done_list = analysis.get("done_list", [])
+    done_count = analysis.get("done_count", 0)
+    done_delta = analysis.get("done_delta")
+    gratitude = analysis.get("gratitude_moments", [])
+    tags = analysis.get("tags", [])
+    keywords = analysis.get("keywords", [])
+    note_count = analysis.get("note_count", 0)
+    badges = analysis.get("badges", [])
+
+    lines = [f"📊 今天的日报来啦！", ""]
+
+    # ─── 区块一：能量状态 ───
+    lines.append("🔋 能量状态")
+    lines.append("")
+
+    # 情绪 + 评分
+    if isinstance(mood_score, (int, float)):
+        filled = int(mood_score)
+        empty = 10 - filled
+        lines.append(f"{mood} {'●' * filled}{'○' * empty} {mood_score}/10")
+    else:
+        lines.append(f"{mood}")
+    lines.append("")
+    lines.append(summary)
+    lines.append("")
+
+    # PUMA 深度洞察
+    if puma_insight:
+        lines.append(f"🧠 情绪洞察: {puma_insight}")
+        lines.append("")
+    if rewrite:
+        lines.append(f"💡 认知改写: {rewrite}")
+        lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # ─── 区块二：高光时刻 ───
+    lines.append("✨ 高光时刻")
+    lines.append("")
+
+    # Done List 战果
+    if done_list:
+        delta_str = ""
+        if done_delta is not None:
+            if done_delta > 0:
+                delta_str = f" ↑{done_delta}"
+            elif done_delta < 0:
+                delta_str = f" ↓{abs(done_delta)}"
+            else:
+                delta_str = " 持平"
+        lines.append(f"🏅 今日战果 × {done_count}{delta_str}")
+        for i, item in enumerate(done_list[:8], 1):
+            text = item.get("text", str(item)) if isinstance(item, dict) else str(item)
+            lines.append(f"  {i}. ✅ {text}")
+        lines.append("")
+
+    # 感恩 Top 3
+    if gratitude:
+        lines.append("💛 感恩瞬间")
+        for i, moment in enumerate(gratitude[:3], 1):
+            text = moment.get("text", str(moment)) if isinstance(moment, dict) else str(moment)
+            lines.append(f"  {i}. 🙏 {text}")
+        lines.append("")
+
+    lines.append("─" * 20)
+    lines.append("")
+
+    # ─── 区块三：进化足迹 ───
+    lines.append("📈 进化足迹")
+    lines.append("")
+
+    # 标签云
+    all_tags = tags + [k for k in keywords if k not in tags]
+    if all_tags:
+        tag_str = " · ".join(all_tags[:6])
+        lines.append(f"🏷️ {tag_str}")
+        lines.append("")
+
+    # 量化数据
+    lines.append(f"📝 笔记 {note_count} 条 | ✅ 完成 {done_count} 件")
+    if done_delta is not None and analysis.get("yesterday_done", -1) >= 0:
+        yesterday = analysis["yesterday_done"]
+        lines.append(f"📊 昨日 {yesterday} → 今日 {done_count}")
+    lines.append("")
+
+    # 勋章
+    if badges:
+        badge_strs = [f"{b['icon']} {b['name']}" for b in badges]
+        lines.append(f"🎖️ 今日勋章: {' | '.join(badge_strs)}")
+        lines.append("")
+
+    return "\n".join(lines).strip()
 
 
 # ============================================================

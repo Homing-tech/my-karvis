@@ -439,10 +439,7 @@ def _build_daily_report_for_send(date_str, analysis):
     done_count = analysis.get("done_count", 0)
     done_delta = analysis.get("done_delta")
     gratitude = analysis.get("gratitude_moments", [])
-    tags = analysis.get("tags", [])
-    keywords = analysis.get("keywords", [])
     note_count = analysis.get("note_count", 0)
-    badges = analysis.get("badges", [])
 
     lines = [f"📊 今天的日报来啦！", ""]
 
@@ -507,25 +504,12 @@ def _build_daily_report_for_send(date_str, analysis):
     lines.append("📈 进化足迹")
     lines.append("")
 
-    # 标签云
-    all_tags = tags + [k for k in keywords if k not in tags]
-    if all_tags:
-        tag_str = " · ".join(all_tags[:6])
-        lines.append(f"🏷️ {tag_str}")
-        lines.append("")
-
     # 量化数据
     lines.append(f"📝 笔记 {note_count} 条 | ✅ 完成 {done_count} 件")
     if done_delta is not None and analysis.get("yesterday_done", -1) >= 0:
         yesterday = analysis["yesterday_done"]
         lines.append(f"📊 昨日 {yesterday} → 今日 {done_count}")
     lines.append("")
-
-    # 勋章
-    if badges:
-        badge_strs = [f"{b['icon']} {b['name']}" for b in badges]
-        lines.append(f"🎖️ 今日勋章: {' | '.join(badge_strs)}")
-        lines.append("")
 
     return "\n".join(lines).strip()
 

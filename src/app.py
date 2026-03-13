@@ -855,6 +855,22 @@ def process_endpoint():
         return "error"
 
 
+@app.route('/debug/process', methods=['POST'])
+def debug_process_endpoint():
+    """临时调试端点"""
+    import traceback as _tb
+    try:
+        data = request.get_json(force=True) or {}
+        user_id = data.get("user_id", "LiangHaoMing")
+        text = data.get("text", "你好")
+        ctx, _ = get_or_create_user(user_id)
+        payload = {"type": "text", "user_text": text, "user_id": user_id, "raw": text}
+        result = brain.process(payload, send_fn=None, ctx=ctx)
+        return json.dumps({"ok": True, "result": str(result)[:5000]}, ensure_ascii=False), 200, {"Content-Type": "application/json"}
+    except Exception as e:
+        return json.dumps({"error": str(e), "type": type(e).__name__, "traceback": _tb.format_exc()[-3000:]}, ensure_ascii=False), 200, {"Content-Type": "application/json"}
+
+
 @app.route('/system', methods=['POST'])
 def system_endpoint():
     """系统端点：定时器/手动触发的 system action（支持多用户遍历）"""

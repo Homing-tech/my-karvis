@@ -313,7 +313,8 @@ def _build_daily_report_v2(date_str, analysis, notes):
     mood = analysis.get("mood", "📝")
     summary = analysis.get("summary", "")
     mood_score = analysis.get("mood_score", "")
-    inner_voice = analysis.get("inner_voice", "")
+    puma_insight = analysis.get("puma_insight", "")
+    rewrite = analysis.get("cognitive_rewrite", "")
     done_list = analysis.get("done_list", [])
     done_count = analysis.get("done_count", 0)
     done_delta = analysis.get("done_delta")
@@ -340,9 +341,12 @@ def _build_daily_report_v2(date_str, analysis, notes):
         lines.append(score_bar)
     lines.append("")
 
-    # 智者之声
-    if inner_voice:
-        lines.append(f"> 🌙 {inner_voice}")
+    # PUMA 深度洞察
+    if puma_insight:
+        lines.append(f"**🧠 情绪洞察**: {puma_insight}")
+        lines.append("")
+    if rewrite:
+        lines.append(f"> 💡 **认知改写**: {rewrite}")
         lines.append("")
 
     # ─── 区块二：高光时刻 ───
@@ -429,7 +433,8 @@ def _build_daily_report_for_send(date_str, analysis):
     mood = analysis.get("mood", "📝")
     summary = analysis.get("summary", "")
     mood_score = analysis.get("mood_score", "")
-    inner_voice = analysis.get("inner_voice", "")
+    puma_insight = analysis.get("puma_insight", "")
+    rewrite = analysis.get("cognitive_rewrite", "")
     done_list = analysis.get("done_list", [])
     done_count = analysis.get("done_count", 0)
     done_delta = analysis.get("done_delta")
@@ -453,9 +458,12 @@ def _build_daily_report_for_send(date_str, analysis):
     lines.append(summary)
     lines.append("")
 
-    # 智者之声
-    if inner_voice:
-        lines.append(f"🌙 {inner_voice}")
+    # PUMA 深度洞察
+    if puma_insight:
+        lines.append(f"🧠 情绪洞察: {puma_insight}")
+        lines.append("")
+    if rewrite:
+        lines.append(f"💡 认知改写: {rewrite}")
         lines.append("")
 
     lines.append("─" * 20)

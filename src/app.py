@@ -745,7 +745,8 @@ def handle_message(msg, user_id):
 
     except Exception as e:
         _log(f"[handle_message] === 处理异常 user={user_id}, 耗时={time.time()-t0:.1f}s ===")
-        _log(f"[handle_message] 异常: {e}")
+        _log(f"[handle_message] 异常类型: {type(e).__name__}, 详情: {e}")
+        _log(f"[handle_message] msg_type={msg_type}, msg_keys={list(msg.keys()) if isinstance(msg, dict) else 'N/A'}")
         import traceback
         traceback.print_exc(file=sys.stderr)
         if user_id:

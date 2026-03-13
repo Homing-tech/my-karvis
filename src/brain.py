@@ -406,7 +406,15 @@ def _call_qwen_flash(messages, max_tokens=500, temperature=0.3):
              f"prompt_tokens={usage.get('prompt_tokens')}, "
              f"completion_tokens={usage.get('completion_tokens')}")
         _log_llm_usage("flash", QWEN_MODEL, usage, t1 - t0)
-        return result["choices"][0]["message"]["content"]
+        choices = result.get("choices", [])
+        if not choices:
+            _log(f"[Brain][Flash] Qwen 返回空 choices: {json.dumps(result)[:300]}")
+            return None
+        content = choices[0].get("message", {}).get("content", "")
+        if not content:
+            _log(f"[Brain][Flash] Qwen 返回空 content, finish_reason={choices[0].get('finish_reason')}")
+            return None
+        return content
 
     _log(f"[Brain][Flash] Qwen API 错误: {resp.status_code} - {resp.text[:200]}")
     raise RuntimeError(f"Qwen API {resp.status_code}")
@@ -764,6 +772,27 @@ def process(payload, send_fn=None, ctx=None):
     # 设置当前线程的 user_id，供 LLM 用量日志使用
     user_id = payload.get("user_id", "unknown")
     _set_current_user(user_id)
+
+    try:
+        return _process_inner(payload, send_fn, ctx, t_start)
+    except Exception as e:
+        _log(f"[Brain] === process 异常 user={user_id}, 耗时={_time.time()-t_start:.1f}s ===")
+        _log(f"[Brain] 异常类型: {type(e).__name__}, 详情: {e}")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        # 尝试保存消息到 Quick-Notes（兜底）
+        try:
+            if payload.get("type") != "system" and ctx:
+                state = read_state_cached(ctx) or {}
+                _save_to_quick_notes(payload, state, ctx)
+        except Exception:
+            pass
+        return {"reply": "抱歉，我暂时有点迷糊，不过你的消息我已经记下了~ 请稍后再试"}
+
+
+def _process_inner(payload, send_fn, ctx, t_start):
+    """brain.process 的内部实现"""
+    user_id = payload.get("user_id", "unknown")
 
     # 0. 预热存储连接（OneDrive 模式需要预热 token + TLS 连接）
     if ctx and hasattr(ctx.IO, 'get_token'):

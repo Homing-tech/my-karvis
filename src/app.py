@@ -859,15 +859,23 @@ def process_endpoint():
 def debug_process_endpoint():
     """临时调试端点：同步执行 brain.process 并返回详细错误"""
     import traceback as _tb
+    import io as _io
+    import sys as _sys
+    
+    # 捕获 stderr
+    old_stderr = _sys.stderr
+    captured = _io.StringIO()
+    _sys.stderr = captured
+    
     try:
-        data = request.get_json(force=True)
+        data = request.get_json(force=True) or {}
         user_id = data.get("user_id", "LiangHaoMing")
         text = data.get("text", "你好")
         
-        # 获取用户上下文
+        step = "get_or_create_user"
         ctx, is_new = get_or_create_user(user_id)
         
-        # 直接构造简单 payload（跳过 build_payload）
+        step = "build_payload"
         payload = {
             "type": "text",
             "user_text": text,
@@ -875,12 +883,28 @@ def debug_process_endpoint():
             "raw": text,
         }
         
-        # 直接调用 brain.process 并捕获异常
+        step = "brain.process"
         result = brain.process(payload, send_fn=None, ctx=ctx)
-        return jsonify({"ok": True, "result": result})
+        
+        _sys.stderr = old_stderr
+        stderr_output = captured.getvalue()
+        
+        return json.dumps({
+            "ok": True,
+            "result": str(result)[:2000],
+            "stderr": stderr_output[-3000:] if stderr_output else ""
+        }, ensure_ascii=False), 200, {"Content-Type": "application/json"}
     except Exception as e:
+        _sys.stderr = old_stderr
+        stderr_output = captured.getvalue()
         tb_str = _tb.format_exc()
-        return jsonify({"error": str(e), "type": type(e).__name__, "traceback": tb_str})
+        return json.dumps({
+            "error": str(e),
+            "type": type(e).__name__,
+            "step": step,
+            "traceback": tb_str[-3000:],
+            "stderr": stderr_output[-3000:] if stderr_output else ""
+        }, ensure_ascii=False), 200, {"Content-Type": "application/json"}
 
 
 @app.route('/system', methods=['POST'])

@@ -35,13 +35,10 @@ def execute(params, state, ctx):
     """
     date_str = (params.get("date") or "").strip()
     if not date_str:
+        # 默认以今天为结束日期，往前推 7 天
         today = datetime.now(BEIJING_TZ).date()
-        # 找到本周日（weekday: Mon=0 ... Sun=6）
-        days_since_sunday = (today.weekday() + 1) % 7
-        sunday = today - timedelta(days=days_since_sunday)
-        date_str = sunday.strftime("%Y-%m-%d")
+        date_str = today.strftime("%Y-%m-%d")
 
-    # 计算本周一到周日
     try:
         end_date = datetime.strptime(date_str, "%Y-%m-%d").date()
     except ValueError:

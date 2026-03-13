@@ -383,10 +383,14 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
     mood_avg = analysis.get("mood_avg", "?")
     trend_analysis = analysis.get("trend_analysis", "")
     achievements = analysis.get("achievements", {})
+    dimension_ratio = analysis.get("dimension_ratio", {})
     pattern = analysis.get("pattern_recognition", {})
     breakthrough = analysis.get("breakthrough", {})
+    seed = analysis.get("seed", {})
     golden_quote = analysis.get("golden_quote", "")
     activity = analysis.get("activity_summary", {})
+
+    SEP = "\n---\n"  # 板块分隔线
 
     lines = [
         "---",
@@ -407,6 +411,7 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
             "",
             weekly_summary,
             "",
+            SEP,
         ])
 
     # ─── 情绪曲线 ───
@@ -424,12 +429,11 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
         score_str = str(score) if score is not None else "-"
         lines.append(f"| {d} | {score_str} | {keyword} |")
 
-    # 趋势分析
     lines.append("")
     lines.append(f"📊 **平均情绪**: {mood_avg}/10")
     if trend_analysis:
         lines.append(f"📈 {trend_analysis}")
-    lines.append("")
+    lines.extend(["", SEP])
 
     # ─── 三维成就 ───
     lines.extend([
@@ -459,6 +463,45 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
             lines.append(f"- 🌈 {item}")
         lines.append("")
 
+    # ─── 三维比例分析 ───
+    if dimension_ratio:
+        s_pct = dimension_ratio.get("survival_pct", "?")
+        g_pct = dimension_ratio.get("growth_pct", "?")
+        e_pct = dimension_ratio.get("enjoyment_pct", "?")
+        ratio_analysis = dimension_ratio.get("analysis", "")
+        low_reminder = dimension_ratio.get("low_dimension_reminder")
+
+        lines.extend([
+            "### 📐 投入比例",
+            "",
+            f"🛡️ 生存 **{s_pct}%** · 🌱 成长 **{g_pct}%** · 🎉 享受 **{e_pct}%**",
+            "",
+        ])
+
+        # 简易比例条
+        try:
+            s_val = int(s_pct)
+            g_val = int(g_pct)
+            e_val = int(e_pct)
+            bar_len = 20
+            s_bar = round(s_val * bar_len / 100)
+            g_bar = round(g_val * bar_len / 100)
+            e_bar = bar_len - s_bar - g_bar
+            lines.append(f"`{'🟦' * s_bar}{'🟩' * g_bar}{'🟨' * max(e_bar, 0)}`")
+            lines.append("")
+        except (ValueError, TypeError):
+            pass
+
+        if ratio_analysis:
+            lines.append(f"📝 {ratio_analysis}")
+            lines.append("")
+
+        if low_reminder:
+            lines.append(f"> 💛 {low_reminder}")
+            lines.append("")
+
+    lines.append(SEP)
+
     # ─── 模式识别 ───
     recurring = pattern.get("recurring_theme", "")
     cognitive_patterns = pattern.get("cognitive_patterns", [])
@@ -475,13 +518,20 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
 
     if cognitive_patterns:
         lines.append("**🧩 认知模式**:")
+        lines.append("")
         for p in cognitive_patterns:
             lines.append(f"- {p}")
         lines.append("")
 
     if deep_insight:
-        lines.append(f"> 💭 {deep_insight}")
-        lines.append("")
+        lines.extend([
+            "> 💭 *深度洞察*",
+            ">",
+            f"> {deep_insight}",
+            "",
+        ])
+
+    lines.append(SEP)
 
     # ─── 破局点 ───
     if breakthrough:
@@ -496,10 +546,31 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
             "",
         ])
         if why:
-            lines.append(f"为什么：{why}")
+            lines.append(f"📌 为什么：{why}")
+            lines.append("")
         if how:
-            lines.append(f"怎么做：{how}")
-        lines.append("")
+            lines.append(f"👉 怎么做：{how}")
+            lines.append("")
+
+    lines.append(SEP)
+
+    # ─── 下周的一粒种子 ───
+    if seed:
+        experiment = seed.get("experiment", "")
+        expected = seed.get("expected_effect", "")
+
+        lines.extend([
+            "## 🌱 下周的一粒种子",
+            "",
+        ])
+        if experiment:
+            lines.append(f"🧪 **微实验**: {experiment}")
+            lines.append("")
+        if expected:
+            lines.append(f"🌸 **如果生根**: {expected}")
+            lines.append("")
+
+    lines.append(SEP)
 
     # ─── 开悟金句 ───
     if golden_quote:
@@ -508,6 +579,7 @@ def _build_enlightenment_report(period_str, start_date_str, analysis, data):
             "",
             f"> 🌟 **{golden_quote}**",
             "",
+            SEP,
         ])
 
     # ─── 数据统计 ───
@@ -544,29 +616,26 @@ def _build_enlightenment_for_send(period_str, analysis):
     mood_avg = analysis.get("mood_avg", "?")
     trend_analysis = analysis.get("trend_analysis", "")
     achievements = analysis.get("achievements", {})
+    dimension_ratio = analysis.get("dimension_ratio", {})
     pattern = analysis.get("pattern_recognition", {})
     breakthrough = analysis.get("breakthrough", {})
+    seed = analysis.get("seed", {})
     golden_quote = analysis.get("golden_quote", "")
     activity = analysis.get("activity_summary", {})
 
+    SEP_LINE = "─" * 20
     lines = [f"🧘 周度开悟报告", f"📅 {period_str}", ""]
 
     # 本周总结
     if weekly_summary:
         lines.append(weekly_summary)
-        lines.append("")
-
-    lines.append("─" * 20)
-    lines.append("")
+        lines.extend(["", SEP_LINE, ""])
 
     # 情绪趋势
     lines.append(f"🌡️ 本周情绪均分: {mood_avg}/10")
     if trend_analysis:
         lines.append(f"📈 {trend_analysis}")
-    lines.append("")
-
-    lines.append("─" * 20)
-    lines.append("")
+    lines.extend(["", SEP_LINE, ""])
 
     # 三维成就
     lines.append("🏆 本周成就")
@@ -580,56 +649,94 @@ def _build_enlightenment_for_send(period_str, analysis):
         lines.append("🛡️ 生存（基本功）")
         for item in survival:
             lines.append(f"  · {item}")
+        lines.append("")
     if growth:
         lines.append("🌱 成长（突破区）")
         for item in growth:
             lines.append(f"  · {item}")
+        lines.append("")
     if enjoyment:
         lines.append("🎉 享受（滋养区）")
         for item in enjoyment:
             lines.append(f"  · {item}")
-    lines.append("")
+        lines.append("")
 
-    lines.append("─" * 20)
-    lines.append("")
+    # 三维比例分析
+    if dimension_ratio:
+        s_pct = dimension_ratio.get("survival_pct", "?")
+        g_pct = dimension_ratio.get("growth_pct", "?")
+        e_pct = dimension_ratio.get("enjoyment_pct", "?")
+        ratio_analysis = dimension_ratio.get("analysis", "")
+        low_reminder = dimension_ratio.get("low_dimension_reminder")
+
+        lines.append(f"📐 投入比例: 🛡️{s_pct}% · 🌱{g_pct}% · 🎉{e_pct}%")
+        lines.append("")
+
+        if ratio_analysis:
+            lines.append(f"  {ratio_analysis}")
+            lines.append("")
+
+        if low_reminder:
+            lines.append(f"  💛 {low_reminder}")
+            lines.append("")
+
+    lines.extend([SEP_LINE, ""])
 
     # 模式识别
     recurring = pattern.get("recurring_theme", "")
     deep_insight = pattern.get("deep_insight", "")
+    cognitive_patterns = pattern.get("cognitive_patterns", [])
 
     lines.append("🔍 模式识别")
     lines.append("")
     if recurring:
         lines.append(f"🔄 {recurring}")
         lines.append("")
+    if cognitive_patterns:
+        for p in cognitive_patterns:
+            lines.append(f"  🧩 {p}")
+        lines.append("")
     if deep_insight:
         lines.append(f"💭 {deep_insight}")
         lines.append("")
 
-    lines.append("─" * 20)
-    lines.append("")
+    lines.extend([SEP_LINE, ""])
 
     # 破局点
     if breakthrough:
         point = breakthrough.get("point", "")
+        why = breakthrough.get("why", "")
         how = breakthrough.get("how", "")
         lines.append("🎯 下周破局点")
         lines.append("")
         if point:
             lines.append(f"💡 {point}")
+        if why:
+            lines.append(f"📌 {why}")
         if how:
             lines.append(f"👉 {how}")
-        lines.append("")
+        lines.extend(["", SEP_LINE, ""])
 
-    lines.append("─" * 20)
-    lines.append("")
+    # 下周的一粒种子
+    if seed:
+        experiment = seed.get("experiment", "")
+        expected = seed.get("expected_effect", "")
+        lines.append("🌱 下周的一粒种子")
+        lines.append("")
+        if experiment:
+            lines.append(f"🧪 {experiment}")
+            lines.append("")
+        if expected:
+            lines.append(f"🌸 如果生根: {expected}")
+            lines.append("")
+        lines.extend([SEP_LINE, ""])
 
     # 开悟金句
     if golden_quote:
         lines.append(f"✨ 本周开悟金句")
         lines.append("")
         lines.append(f"🌟 {golden_quote}")
-        lines.append("")
+        lines.extend(["", SEP_LINE, ""])
 
     # 数据
     notes_count = activity.get("this_week_notes", 0)
